@@ -141,7 +141,7 @@ export default function CloserTracker() {
         <header style={{ marginBottom: 24, display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
           <div>
             <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.12em', color: '#8a7d6b', textTransform: 'uppercase', marginBottom: 6 }}>
-              SmartLeadz · Closer Performance
+              Clover · Closer Performance
             </div>
             <h1 style={{ margin: 0, fontSize: 32, fontWeight: 600, letterSpacing: '-0.02em' }}>Closer Dashboard</h1>
             <div style={{ fontSize: 12, color: '#8a7d6b', marginTop: 4 }}>

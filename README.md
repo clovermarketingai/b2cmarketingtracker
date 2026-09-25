@@ -1,4 +1,4 @@
-# SmartLeadz B2C Tracker
+# Clover B2C Tracker
 
 Live Facebook ad performance + per-client P&L. Pulls from Windsor.ai on every page load.
 

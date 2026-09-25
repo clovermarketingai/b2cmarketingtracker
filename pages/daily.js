@@ -241,7 +241,7 @@ export default function DailyBreakdown() {
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = `smartleadz-daily-all-time.csv`;
+    a.href = url; a.download = `clover-daily-all-time.csv`;
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
   };
@@ -265,7 +265,7 @@ export default function DailyBreakdown() {
           <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
             <div>
               <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.12em', color: '#8a7d6b', textTransform: 'uppercase', marginBottom: 6 }}>
-                SmartLeadz · B2C Performance
+                Clover · B2C Performance
               </div>
               <h1 style={{ margin: 0, fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em' }}>Daily breakdown · all time</h1>
               <div style={{ fontSize: 12, color: '#8a7d6b', marginTop: 4 }}>
