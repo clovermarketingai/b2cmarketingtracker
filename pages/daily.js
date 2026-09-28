@@ -1,56 +1,28 @@
 import React, { useState, useEffect, useMemo } from 'react';
 
-const REVENUE_RULES = {
-  "(Nico) PROS Tree & Landscape":              { revenue: ({ days }) => (days / 7) * 1000 },
-  "(Ed) Protree Services LLC":                 { revenue: ({ leads }) => leads * 85 },
-  "(Leonardo) HLI Tree Experts":               { revenue: ({ leads }) => leads * 80 },
-  "(Chris) Five Star Tree Service Long Island":{ revenue: ({ leads }) => leads * 75 },
-  "(Mario) Arborcare Group":                   { revenue: ({ leads }) => leads * 65 },
-  "(Tomas) Green Leaves Tree Care Corp":       { revenue: ({ leads }) => leads * 75 },
-  "(Gerald) GBZ Tree LLC": {
-    revenue: ({ leads, lifetimeTotal = leads }) => {
-      const lifetimeBefore = lifetimeTotal - leads;
-      const tier1Remaining = Math.max(0, 10 - lifetimeBefore);
-      const tier1Leads = Math.min(leads, tier1Remaining);
-      const tier2Leads = leads - tier1Leads;
-      return tier1Leads * 46 + tier2Leads * 70;
-    },
-  },
-  "(Edgar) Vema Tree Service":                 { revenue: ({ leads }) => leads * 90 },
-  "(Cesar) Cesar Tree Service Inc":            { revenue: () => 0, paused: true },
-};
+// Client roster, short names, Airtable names and revenue rules come from
+// /api/config (see lib/clients.js). They are fetched after sign-in instead of
+// being compiled into this public page chunk.
 
-const LIFETIME_LEADS = { "(Gerald) GBZ Tree LLC": 12 };
-
-const SHORT_NAMES = {
-  "(Nico) PROS Tree & Landscape":              "Nico PROS",
-  "(Ed) Protree Services LLC":                 "Ed Protree",
-  "(Leonardo) HLI Tree Experts":               "Leonardo HLI",
-  "(Chris) Five Star Tree Service Long Island":"Chris Five Star",
-  "(Mario) Arborcare Group":                   "Mario Arborcare",
-  "(Tomas) Green Leaves Tree Care Corp":       "Tomas Green Leaves",
-  "(Gerald) GBZ Tree LLC":                     "Gerald GBZ",
-  "(Edgar) Vema Tree Service":                 "Edgar Vema",
-  "(Cesar) Cesar Tree Service Inc":            "Cesar",
-};
-
-// Map Windsor campaign client name → Airtable Clients table primary name
-// Used to look up billed-lead counts from /api/leads.
-const WINDSOR_TO_AIRTABLE_CLIENT = {
-  "(Nico) PROS Tree & Landscape":              "PROS Tree & Landscape (Phoenix)",
-  "(Ed) Protree Services LLC":                 "Protree Services LLC",
-  "(Leonardo) HLI Tree Experts":               "HLI Tree Experts",
-  "(Chris) Five Star Tree Service Long Island":"Five Star Tree Service Long Island",
-  "(Mario) Arborcare Group":                   "Arborcare group",
-  "(Tomas) Green Leaves Tree Care Corp":       "Green Leaves Tree Care",
-  "(Gerald) GBZ Tree LLC":                     "GBZ Tree LLC",
-  "(Edgar) Vema Tree Service":                 "Vema Tree Service",
-  "(Cesar) Cesar Tree Service Inc":            "Cesar Tree Service Inc",
-};
+// Revenue for one day of rows for a client, from its rule descriptor.
+function revenueFor(client, { leads, days = 1 }) {
+  if (!client || client.paused || !client.rule) return 0;
+  const rule = client.rule;
+  if (rule.type === 'perLead') return leads * rule.rate;
+  if (rule.type === 'weekly') return (days / 7) * rule.perWeek;
+  if (rule.type === 'tiered') {
+    const lifetimeTotal = client.lifetimeTotal != null ? client.lifetimeTotal : leads;
+    const lifetimeBefore = lifetimeTotal - leads;
+    const tier1Remaining = Math.max(0, rule.tier1Leads - lifetimeBefore);
+    const tier1Leads = Math.min(leads, tier1Remaining);
+    const tier2Leads = leads - tier1Leads;
+    return tier1Leads * rule.tier1Rate + tier2Leads * rule.tier2Rate;
+  }
+  return 0;
+}
 
 const isClientCampaign = (c) => c.startsWith('(');
 const clientFromCampaign = (c) => isClientCampaign(c) ? c.replace(/\s*-\s*Tree Service.*$/, '') : c;
-const shortName = (full) => SHORT_NAMES[full] || full;
 
 const fmt$ = (n) => '$' + (n ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtSigned$ = (n) => (n >= 0 ? '+' : '−') + '$' + Math.abs(n).toFixed(2);
@@ -88,6 +60,9 @@ export default function DailyBreakdown() {
   const [fetchedAt, setFetchedAt] = useState(null);
   const [leadsStats, setLeadsStats] = useState(null);
   const [campaignFilter, setCampaignFilter] = useState('All campaigns');
+  const [clients, setClients] = useState({});
+
+  const shortName = (full) => (clients[full] && clients[full].short) || full;
 
   useEffect(() => {
     let cancelled = false;
@@ -97,9 +72,15 @@ export default function DailyBreakdown() {
     Promise.all([
       fetch('/api/windsor').then(r => r.json()),
       fetch('/api/leads').then(r => r.json()),
+      fetch('/api/config').then(r => r.json()),
     ])
-      .then(([windsorData, leadsData]) => {
+      .then(([windsorData, leadsData, configData]) => {
         if (cancelled) return;
+        if (configData.error) {
+          setError('Config: ' + configData.error);
+          setLoading(false);
+          return;
+        }
         if (windsorData.error) {
           setError('Windsor: ' + windsorData.error);
           setLoading(false);
@@ -110,6 +91,7 @@ export default function DailyBreakdown() {
           setLoading(false);
           return;
         }
+        setClients(configData.clients || {});
         setRows(windsorData.rows || []);
         setLeadsByKey(leadsData.leadsByKey || {});
         setLeadsStats(leadsData.stats || null);
@@ -135,7 +117,7 @@ export default function DailyBreakdown() {
 
   // Get billed-lead count from Airtable for a given (windsorClient, date)
   const billedLeadsFor = (windsorClient, date) => {
-    const airtableName = WINDSOR_TO_AIRTABLE_CLIENT[windsorClient];
+    const airtableName = clients[windsorClient] && clients[windsorClient].airtable;
     if (!airtableName) return 0;
     return leadsByKey[`${airtableName}|${date}`] || 0;
   };
@@ -168,11 +150,7 @@ export default function DailyBreakdown() {
       const client = clientFromCampaign(r.campaign);
       // Override Windsor's lead count with Airtable's billed lead count
       const leads = billedLeadsFor(client, r.date);
-      const rule = REVENUE_RULES[client];
-      let revenue = 0;
-      if (rule && !rule.paused) {
-        revenue = rule.revenue({ leads, days: 1, lifetimeTotal: LIFETIME_LEADS[client] });
-      }
+      const revenue = revenueFor(clients[client], { leads, days: 1 });
       const profit = revenue - r.spend;
       const margin = revenue > 0 ? (profit / revenue) * 100 : (r.spend > 0 ? -100 : 0);
       return {
@@ -197,7 +175,7 @@ export default function DailyBreakdown() {
       return a.client.localeCompare(b.client);
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filteredRows, leadsByKey]);
+  }, [filteredRows, leadsByKey, clients]);
 
   const totals = useMemo(() => {
     const t = dailyRows.reduce((acc, r) => ({
@@ -245,6 +223,19 @@ export default function DailyBreakdown() {
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
   };
+
+  // Footer rate-card summary, built from /api/config rather than hard-coded.
+  const pricingLabel = useMemo(() => Object.values(clients)
+    .filter(c => c && c.rule && !c.paused && c.rule.type !== 'none')
+    .map(c => {
+      const r = c.rule;
+      if (r.type === 'perLead') return `${c.short} $${r.rate}`;
+      if (r.type === 'weekly') return `${c.short} $${r.perWeek % 1000 === 0 ? (r.perWeek / 1000) + 'k' : r.perWeek}/week`;
+      if (r.type === 'tiered') return `${c.short} tiered`;
+      return null;
+    })
+    .filter(Boolean)
+    .join(', '), [clients]);
 
   const lastSyncLabel = fetchedAt
     ? new Date(fetchedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
@@ -366,7 +357,7 @@ export default function DailyBreakdown() {
 
         <div style={{ fontSize: 11, color: '#a99c87', textAlign: 'center', marginTop: 20, lineHeight: 1.7 }}>
           All-time daily breakdown. Lead counts pulled from Airtable (billed leads only — $price, not Free/Replacement/Prepay/Unbilled). PROS counts all leads (flat retainer).<br />
-          Pricing: Ed $85, HLI $80, Five Star $75, Arborcare $65, Green Leaves $75, Vema $90, PROS $1k/week, GBZ tiered.
+          {pricingLabel ? `Pricing: ${pricingLabel}.` : null}
         </div>
       </div>
     </div>
