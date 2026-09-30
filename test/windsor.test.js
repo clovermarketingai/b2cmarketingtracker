@@ -156,7 +156,7 @@ test('normaliseRows: dedupes, coerces, classifies, drops and warns', () => {
 
   assert.equal(meta.fetchedRows, 14);
   assert.equal(meta.dropped, 4);
-  assert.deepEqual(meta.droppedDetail, { noCampaign: 2, noDate: 2 });
+  assert.deepEqual(meta.droppedDetail, { noCampaign: 2, noDate: 2, excluded: 0 });
 
   const ed29 = rows.find(r => r.campaignId === '111' && r.date === '2026-09-29');
   assert.deepEqual(ed29, {
@@ -369,3 +369,15 @@ test('fetchAllTimeAds: pulls from 2024-01-01 through today in the business timez
     assert.equal(out.meta.to, '2026-09-29');
   } finally { m.restore(); }
 }));
+
+test('ADS_EXCLUDE_CAMPAIGN_IDS drops those campaigns and reports the spend', async () => {
+  const { normaliseRows } = await import('../lib/dashboard/sources/windsor.js');
+  const raw = { data: [
+    { date: '2026-09-29', campaign: 'B2B Tax - Firms', campaign_id: '111', spend: '10', clicks: 1, impressions: 10, actions_lead: 0 },
+    { date: '2026-09-29', campaign: 'B2B Tax - Other business', campaign_id: '222', spend: '99', clicks: 1, impressions: 10, actions_lead: 0 },
+  ] };
+  const out = normaliseRows(raw, { excludeIds: new Set(['222']) });
+  assert.equal(out.rows.length, 1);
+  assert.equal(out.rows[0].campaignId, '111');
+  assert.ok(out.meta.warnings.some(w => w.includes('ADS_EXCLUDE_CAMPAIGN_IDS') && w.includes('$99.00')));
+});
