@@ -66,9 +66,17 @@ test('weeks of month are 7-day blocks from the 1st', () => {
   assert.equal(weeksOfMonth('2026-02-01')[3].to, '2026-02-28');
 });
 
-test('pull window covers last month, l30d and the l30d comparison period', () => {
-  assert.deepEqual(pullWindow('2026-09-30'), { from: '2026-08-01', to: '2026-09-30' });
-  assert.deepEqual(pullWindow('2026-09-02'), { from: '2026-07-05', to: '2026-09-02' });
+test('pull window covers the month before last (for the last-month comparison) and the l30d comparison period', () => {
+  assert.deepEqual(pullWindow('2026-09-30'), { from: '2026-07-01', to: '2026-09-30' });
+  assert.deepEqual(pullWindow('2026-09-02'), { from: '2026-07-01', to: '2026-09-02' });
+  assert.deepEqual(pullWindow('2026-03-01'), { from: '2026-01-01', to: '2026-03-01' });
+});
+
+test('weeks carry `through`: the last day the column covers', () => {
+  const w = weeksOfMonth('2026-09-16');
+  assert.equal(w[0].through, '2026-09-07');
+  assert.equal(w[2].through, '2026-09-16');
+  assert.equal(w[3].through, null);
 });
 
 test('month elapsed fraction counts today as a full day', () => {

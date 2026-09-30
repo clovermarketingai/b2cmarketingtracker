@@ -212,3 +212,16 @@ test('constants: CEO-only ids exclude shared rows; DAILY_IDS covers the whole ca
     'billedValue', 'retainer', 'cplBilled', 'profit', 'margin', 'lastLeadDate', 'daysSinceLastLead',
   ]);
 });
+
+test('CSV cells neutralise spreadsheet formula injection', async () => {
+  const { csvCell, CEO_ONLY_IDS } = await import('../lib/dashboard/export.js');
+  assert.equal(csvCell('=HYPERLINK("x")'), `"'=HYPERLINK(""x"")"`);
+  assert.equal(csvCell('+1'), "'+1");
+  assert.equal(csvCell('-5 leads'), "'-5 leads");
+  assert.equal(csvCell('@me'), "'@me");
+  assert.equal(csvCell(-5), '-5');
+  assert.equal(csvCell('plain'), 'plain');
+  assert.ok(CEO_ONLY_IDS.includes('business_costs'));
+  assert.ok(CEO_ONLY_IDS.includes('uncategorised_costs'));
+  assert.ok(!CEO_ONLY_IDS.includes('hs_billed_value'));
+});

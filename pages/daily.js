@@ -32,7 +32,8 @@ const CSV_COLUMNS = ['date', 'client', 'campaigns', 'spend', 'leads', 'billed', 
 
 function csvCell(v) {
   if (v == null) return '';
-  const s = typeof v === 'number' ? (Number.isInteger(v) ? String(v) : v.toFixed(2)) : String(v);
+  let s = typeof v === 'number' ? (Number.isInteger(v) ? String(v) : v.toFixed(2)) : String(v);
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`; // no spreadsheet formula injection from upstream names
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 

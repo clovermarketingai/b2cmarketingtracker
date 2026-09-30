@@ -34,11 +34,11 @@ export default async function handler(req, res) {
 
   try {
     const ceoUnlocked = await ceoUnlockedFor(req);
-    const payload = await loadDashboard({ refresh, ceoUnlocked });
-    payload.ceoConfigured = ceoConfigured();
     if (sections && sections.includes('ceo') && !ceoUnlocked) {
       return res.status(403).json({ error: 'The CEO section is locked for this session. Unlock it at POST /api/ceo or use the API key.' });
     }
+    const payload = await loadDashboard({ refresh, ceoUnlocked });
+    payload.ceoConfigured = ceoConfigured();
     if (format === 'flat') {
       return res.status(200).json(flattenPayload(payload, { sections }));
     }

@@ -3,7 +3,7 @@
 // source with refresh=true so the first human load of the day is instant,
 // then, when a "Dashboard Snapshots" table exists in AIRTABLE_DASHBOARD_BASE,
 // appends one record per CEO row and per primary row of every section, for
-// Range 'today' and 'mtd'. The snapshot step can never fail the request: its
+// Range 'yesterday' (dated yesterday) and 'mtd'. The snapshot step can never fail the request: its
 // error is reported in the response instead.
 // Auth: middleware.js (CRON_SECRET as Vercel Cron sends it, or DASHBOARD_API_KEY).
 
@@ -14,9 +14,9 @@ export const config = { maxDuration: 60 };
 
 /**
  * The snapshot records for a payload: CEO rows plus every primary row,
- * de-duplicated by metric id, for 'today' and 'mtd', null values skipped.
+ * de-duplicated by metric id, for 'yesterday' and 'mtd', null values skipped.
  * @param {object} payload
- * @returns {Array<{ date: string, metric: string, range: 'today'|'mtd', value: number, generatedAt: string }>}
+ * @returns {Array<{ date: string, metric: string, range: 'yesterday'|'mtd', value: number, generatedAt: string }>}
  */
 export function snapshotRecords(payload) {
   const seen = new Set();
@@ -27,10 +27,13 @@ export function snapshotRecords(payload) {
   const out = [];
   const generatedAt = payload.generatedAt || new Date().toISOString();
   for (const r of rows) {
-    for (const range of ['today', 'mtd']) {
+    // The cron runs early in the morning, so 'today' would be a sliver of a
+    // day. Store yesterday's complete day (dated yesterday) and MTD as of now.
+    for (const range of ['yesterday', 'mtd']) {
       const v = r.values ? r.values[range] : null;
       if (v == null || !Number.isFinite(Number(v))) continue;
-      out.push({ date: payload.today, metric: r.id, range, value: Number(v), generatedAt });
+      const date = range === 'yesterday' ? (payload.ranges && payload.ranges.yesterday ? payload.ranges.yesterday.from : payload.today) : payload.today;
+      out.push({ date, metric: r.id, range, value: Number(v), generatedAt });
     }
   }
   return out;

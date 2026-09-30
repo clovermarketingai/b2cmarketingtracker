@@ -221,3 +221,52 @@ test('weekly columns partition the MTD total for cumulative rows', () => {
   const weekSum = ['w1', 'w2', 'w3', 'w4', 'w5'].reduce((s, k) => s + (leads.values[k] || 0), 0);
   assert.equal(weekSum, leads.values.mtd);
 });
+
+test('the week in progress only covers elapsed days (retainers, monthly costs, per-day rates)', () => {
+  const today = '2026-09-16';
+  const { datasets, targets } = demoDatasets(today);
+  const p = buildDashboard({ today, tz: 'UTC', datasets, availability: {}, targets, ceoUnlocked: true });
+  const billed = p.sections.find(s => s.id === 'hs_delivery').rows.find(r => r.id === 'hs_billed_value');
+  const direct = sectionValues(datasets, { from: '2026-09-15', to: '2026-09-16' });
+  assert.equal(billed.values.w3, direct.hs_billed_value);
+  const payroll = p.ceo.rows.find(r => r.id === 'payroll');
+  assert.ok(Math.abs(payroll.values.w3 - 2 * (14000 / 30)) < 1e-6);
+  assert.ok(Math.abs(billed.values.w1 + billed.values.w2 + billed.values.w3 - billed.values.mtd) < 1e-6);
+  assert.equal(billed.values.w4, null);
+  assert.equal(p.weeks[2].through, '2026-09-16');
+});
+
+test('a locked CEO section withholds money series and the Whop product table', () => {
+  const today = '2026-09-30';
+  const { datasets, targets } = demoDatasets(today);
+  const locked = buildDashboard({ today, tz: 'UTC', datasets, availability: {}, targets, ceoUnlocked: false });
+  assert.equal('cash_collected' in locked.series, false);
+  assert.equal('profit_business' in locked.series, false);
+  assert.ok(Array.isArray(locked.series.leads_billed));
+  assert.equal(locked.tables.whopProducts, null);
+  const open = buildDashboard({ today, tz: 'UTC', datasets, availability: {}, targets, ceoUnlocked: true });
+  assert.ok(Array.isArray(open.series.cash_collected));
+  assert.ok(Array.isArray(open.tables.whopProducts));
+});
+
+test('an infinite pace is reported as a flag with the right status', () => {
+  const r = paceFor({ cumulative: true, dir: 'lower' }, 0, 500, 0.5);
+  assert.equal(r.pace, null);
+  assert.equal(r.paceInfinite, true);
+  assert.equal(r.status, 'well_ahead');
+});
+
+test('an unconfigured campaign client still joins to the Airtable client of the same name', () => {
+  const ds = {
+    ads: { rows: [{ date: '2026-09-29', campaign: '(New) Someone LLC - Tree Service', campaignId: 'z', line: 'hs_b2c', client: '(New) Someone LLC', spend: 10, clicks: 1, impressions: 10, fbLeads: 0 }] },
+    hsLeads: { rows: [{ date: '2026-09-29', client: 'Someone LLC', kind: 'billed', price: 50 }] },
+    retainers,
+  };
+  const act = clientActivity(ds, R('2026-09-29', '2026-09-29'));
+  const someone = [...act.values()].filter(c => c.key === 'someone llc');
+  assert.equal(someone.length, 1);
+  const c = someone[0];
+  assert.equal(c.spend, 10);
+  assert.equal(c.leads, 1);
+  assert.equal(c.unmapped, true);
+});

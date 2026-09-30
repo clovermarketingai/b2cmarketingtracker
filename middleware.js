@@ -34,9 +34,10 @@ export async function middleware(request) {
     return NextResponse.json({ error: 'unauthorised', hint: 'Send Authorization: Bearer <DASHBOARD_API_KEY>' }, { status: 401 });
   }
   if (pathname.startsWith('/api/cron/')) {
+    // Cron writes (snapshots), so the read-only API key does not open it.
     const key = extractApiKey(request);
-    if (key && (await cronSecretOk(key) || await apiKeyOk(key))) return NextResponse.next();
-    return NextResponse.json({ error: 'unauthorised' }, { status: 401 });
+    if (key && await cronSecretOk(key)) return NextResponse.next();
+    return NextResponse.json({ error: 'unauthorised', hint: 'Send Authorization: Bearer <CRON_SECRET>' }, { status: 401 });
   }
 
   if (authed) return NextResponse.next();

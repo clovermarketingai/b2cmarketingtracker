@@ -198,7 +198,7 @@ test('buildUrl / createdAfterISO', () => {
   const u = new URL(buildUrl({ companyId: 'biz_1', from: '2026-09-05' }));
   assert.equal(u.origin + u.pathname, 'https://api.whop.com/api/v1/payments');
   assert.equal(u.searchParams.get('company_id'), 'biz_1');
-  assert.equal(u.searchParams.get('first'), '100');
+  assert.equal(u.searchParams.get('first'), '50');
   assert.equal(u.searchParams.get('created_after'), '2026-09-02T00:00:00.000Z');
   assert.equal(u.searchParams.get('order'), 'created_at');
   assert.equal(u.searchParams.get('direction'), 'desc');
