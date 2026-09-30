@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
-import { COOKIE, verifyToken } from './lib/auth';
+import { COOKIE, verifyToken, extractApiKey, apiKeyOk, cronSecretOk } from './lib/auth';
 
 // Where an already signed-in visit to /login is sent.
-const HOME = '/daily';
+const HOME = '/';
 
 export const config = {
   matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
@@ -23,6 +23,20 @@ export async function middleware(request) {
       return NextResponse.redirect(home);
     }
     return NextResponse.next();
+  }
+
+  // Machine access: the external read API takes the dashboard API key
+  // (or a signed-in browser session); cron endpoints take the cron secret.
+  // Both fail closed when their env var is unset.
+  if (pathname.startsWith('/api/v1/')) {
+    const key = extractApiKey(request);
+    if ((key && await apiKeyOk(key)) || authed) return NextResponse.next();
+    return NextResponse.json({ error: 'unauthorised', hint: 'Send Authorization: Bearer <DASHBOARD_API_KEY>' }, { status: 401 });
+  }
+  if (pathname.startsWith('/api/cron/')) {
+    const key = extractApiKey(request);
+    if (key && (await cronSecretOk(key) || await apiKeyOk(key))) return NextResponse.next();
+    return NextResponse.json({ error: 'unauthorised' }, { status: 401 });
   }
 
   if (authed) return NextResponse.next();
