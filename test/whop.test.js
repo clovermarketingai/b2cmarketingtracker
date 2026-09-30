@@ -215,7 +215,7 @@ test('isConfigured / amountsInCents / setupHint', async () => {
     assert.equal(isConfigured(), false);
     assert.equal(amountsInCents(), false);
     process.env.WHOP_API_KEY = 'k';
-    assert.equal(isConfigured(), false);
+    assert.equal(isConfigured(), true);   // the key alone is enough
     process.env.WHOP_COMPANY_ID = 'biz_x';
     assert.equal(isConfigured(), true);
     process.env.WHOP_AMOUNTS_IN_CENTS = '1';
@@ -236,7 +236,15 @@ test('fetchPayments: throws unconfigured with env var names', async () => {
     await assert.rejects(fetchPayments({ from: '2026-09-01', to: '2026-09-30', tz: TZ }), (e) => e instanceof SourceError && e.missingConfig && /WHOP_API_KEY/.test(e.hint));
   });
   await withEnv({ WHOP_API_KEY: 'k', WHOP_COMPANY_ID: null }, async () => {
-    await assert.rejects(fetchPayments({ from: '2026-09-01', to: '2026-09-30', tz: TZ }), (e) => e instanceof SourceError && e.missingConfig && /WHOP_COMPANY_ID/.test(e.hint));
+    // A company key needs no company id: the request simply omits it.
+    const calls = [];
+    const prevFetch = globalThis.fetch;
+    globalThis.fetch = async (url) => { calls.push(String(url)); return { ok: true, status: 200, headers: { get: () => null }, text: async () => JSON.stringify({ data: [], page_info: { has_next_page: false } }) }; };
+    try {
+      const out = await fetchPayments({ from: '2026-09-01', to: '2026-09-30', tz: TZ });
+      assert.equal(out.rows.length, 0);
+      assert.ok(!new URL(calls[0]).searchParams.has('company_id'));
+    } finally { globalThis.fetch = prevFetch; }
   });
   await withEnv({ WHOP_API_KEY: 'k', WHOP_COMPANY_ID: 'biz_1' }, async () => {
     await assert.rejects(fetchPayments({ from: 'bad', to: '2026-09-30', tz: TZ }), /from=YYYY-MM-DD/);
