@@ -30,7 +30,7 @@ Set these in Vercel (Project → Settings → Environment Variables) for Product
 | `SESSION_SECRET` | yes | Signs the session cookie (`clover_session`) and the CEO cookie. Rotating it signs everyone out at once. | Generate: `openssl rand -hex 32`. |
 | `CEO_PASSWORD` | optional | Unlocks the CEO section (see [CEO lock](#5-ceo-lock)). Unset = the CEO section is visible to every signed-in user. | Choose one. |
 | `DASHBOARD_API_KEY` | optional | Read access to `/api/v1/*` for Sheets, n8n, Grow, curl (see [External API](#6-external-api)). Unset = the external API answers 401 to everything except a signed-in browser. | Generate: `openssl rand -hex 32`. |
-| `CRON_SECRET` | optional | What Vercel Cron sends to `/api/cron/refresh`. Unset = the cron endpoint only accepts the API key. | Generate: `openssl rand -hex 32`. Vercel reads this exact name and sends it as `Authorization: Bearer <CRON_SECRET>`. |
+| `CRON_SECRET` | optional | What Vercel Cron sends to `/api/cron/refresh`. It is the **only** credential that route accepts (the read-only `DASHBOARD_API_KEY` does not open it, because the cron writes snapshots). Unset = the cron endpoint answers `401` to everything and the daily snapshot is never written. | Generate: `openssl rand -hex 32`. Vercel reads this exact name and sends it as `Authorization: Bearer <CRON_SECRET>`. |
 
 ### Dashboard behaviour
 
@@ -53,7 +53,7 @@ Set these in Vercel (Project → Settings → Environment Variables) for Product
 
 | Variable | Default | What it is for |
 |---|---|---|
-| `AIRTABLE_API_KEY` | — (required) | Personal access token for the Home Service base. Scopes: `data.records:read` for the dashboard, plus `data.records:write` (snapshots) and `schema.bases:write` (`POST /api/setup`) on the dashboard base. Create at airtable.com/create/tokens and grant it access to the base(s). |
+| `AIRTABLE_API_KEY` | — (required) | Personal access token for the Home Service base. Scopes: `data.records:read` for the dashboard, plus `data.records:write` (snapshots), `schema.bases:read` (listing the dashboard tables: `GET /api/setup`, the daily snapshot's table check and the Data sources table check all call the Airtable meta `/tables` API) and `schema.bases:write` (`POST /api/setup` creates the tables) on the dashboard base. Create at airtable.com/create/tokens and grant it access to the base(s). |
 | `AIRTABLE_HS_BASE` | `appG9APSCkeYOQLbl` | The Home Service base id. |
 | `AIRTABLE_HS_LEADS_TABLE` | `tblpbVnP4y7YlGcML` | Leads table: `Assigned Client` (link to Clients), `Lead Cost` (single select `$45` … `$115`, `Free`, `Replacement`, `Prepay`, `Unbilled` or blank). The record's `createdTime` is the lead time. |
 | `AIRTABLE_HS_CLIENTS_TABLE` | `tblTEOPYFNgfE5NdU` | Clients table: primary field `Company Name` (fallback `Name`). |
@@ -119,19 +119,19 @@ Targets are keyed by **row id + month**. A row with no target for the current mo
 
 ### "Dashboard Snapshots" (optional)
 
-Written by `/api/cron/refresh` once a day; nothing reads it back into the dashboard. It is your history for Sheets / BI.
+Written by `/api/cron/refresh` once a day (early in the morning, see [section 7](#7-vercel-cron-and-daily-snapshots)); nothing reads it back into the dashboard. It is your history for Sheets / BI. Because the cron runs a few hours into the business day, it does not store a partial "today": each run stores **yesterday's complete day** plus **month to date as of the run**.
 
 | Field | Type | Values |
 |---|---|---|
-| `Date` | date (ISO) | The business day the snapshot describes. |
+| `Date` | date (ISO) | The business day the row describes: yesterday for `Range = yesterday`, the run day for `Range = mtd`. |
 | `Metric` | single line text | Catalog row id. |
-| `Range` | single select | `today` or `mtd`. |
+| `Range` | single select | `yesterday` (the full previous business day) or `mtd` (the 1st of the month through the moment of the run). |
 | `Value` | number (2 decimals) | The value at snapshot time. |
 | `Generated At` | single line text | ISO timestamp of the payload. |
 
 ### Creating the tables: `POST /api/setup`
 
-The token in `AIRTABLE_API_KEY` needs `schema.bases:write` on `AIRTABLE_DASHBOARD_BASE`. The route is session-protected, so call it from a signed-in browser (DevTools console) or with the session cookie:
+The token in `AIRTABLE_API_KEY` needs `schema.bases:read` (to list the tables that exist) and `schema.bases:write` (to create the missing ones) on `AIRTABLE_DASHBOARD_BASE`. The route is session-protected, so call it from a signed-in browser (DevTools console) or with the session cookie:
 
 ```js
 // In the browser console while signed in at https://b2c.clovermarketing.ai/
@@ -139,7 +139,7 @@ await (await fetch('/api/setup', { method: 'POST' })).json()
 // -> { ok: true, base: "app…", created: ["Dashboard Costs", …], existing: [], errors: [] }
 ```
 
-`GET /api/setup` reports which of the three tables exist (`{ base, tables: { "Dashboard Costs": true, … }, missing: [...] }`) without changing anything. A `207` response means some tables were created and some failed; the `errors` array names each one. A `400` with `missingConfig: true` means `AIRTABLE_API_KEY` is unset. The tables are created empty; add rows in Airtable.
+`GET /api/setup` reports which of the three tables exist (`{ base, tables: { "Dashboard Costs": true, … }, missing: [...] }`) without changing anything; when `AIRTABLE_API_KEY` is unset it still answers `200`, with every table `null`, `missingConfig: true` and a `hint`. A `502` from `GET` means Airtable refused the meta call (most often a token without `schema.bases:read`). For `POST /api/setup`, a `207` means some tables were created and some failed (the `errors` array names each one) and a `400` with `missingConfig: true` means `AIRTABLE_API_KEY` is unset. The tables are created empty; add rows in Airtable.
 
 ---
 
@@ -200,7 +200,7 @@ The CEO section (cash, all costs, known profit) can be restricted to the owner.
 
 - **Unset `CEO_PASSWORD`** → the CEO section is shown to every signed-in user. `GET /api/ceo` answers `{ configured: false, unlocked: true }`.
 - **Set `CEO_PASSWORD`** → the section is hidden (the payload returns `ceo: { locked: true }` with no rows) until the viewer unlocks it. The dashboard's *Unlock CEO* control does `POST /api/ceo { "password": "…" }`, which sets a host-only `clover_ceo` cookie signed with `SESSION_SECRET`. **The unlock lasts 12 hours**, then the section locks again. `DELETE /api/ceo` locks it immediately. A wrong password answers `401` after a short delay.
-- **API key holders always see CEO rows.** Any request to `/api/v1/*` or `/api/cron/refresh` that carries a valid `DASHBOARD_API_KEY` is treated as unlocked, so Sheets and n8n get the full picture. Give the API key only to people who may see CEO numbers; a signed-in browser session without the CEO cookie gets `403` from `?section=ceo` and from CEO-only ids on `/api/v1/daily`.
+- **API key holders always see CEO rows.** Any request to `/api/v1/*` that carries a valid `DASHBOARD_API_KEY` is treated as unlocked, so Sheets and n8n get the full picture. Give the API key only to people who may see CEO numbers; a signed-in browser session without the CEO cookie gets `403` from `?section=ceo` and from CEO-only ids on `/api/v1/daily`. The cron route (`CRON_SECRET` only) always builds the payload unlocked so the daily snapshot includes the CEO rows.
 - The CEO cookie is deliberately not shared across `*.clovermarketing.ai`: unlocking here never unlocks another Clover app.
 
 Because both cookies are signed with `SESSION_SECRET`, rotating that secret logs everyone out and re-locks the CEO section everywhere at once.
@@ -213,7 +213,9 @@ Read-only JSON/CSV for Google Sheets, n8n, Grow or any BI tool. Auth is the `DAS
 
 - `Authorization: Bearer <key>` header (preferred)
 - `x-api-key: <key>` header
-- `?api_key=<key>` query parameter (for tools that cannot set headers, such as `IMPORTDATA`)
+- `?api_key=<key>` query parameter, **only** for tools that cannot set headers at all (Google Sheets `IMPORTDATA`)
+
+**Prefer the header.** A key in the query string is less safe than one in a header: the full URL lands in Vercel's request logs and any log drain, in proxy logs, in browser history when pasted into a tab, and in every sheet formula that anyone with read access to the sheet can see. Use `?api_key=` where a header is impossible and nowhere else, keep such sheets private, and rotate `DASHBOARD_API_KEY` if a URL carrying it has been shared.
 
 A signed-in browser session also works, which is handy for testing in a tab. Without a key and without a session every `/api/v1/*` route answers `401 { "error": "unauthorised" }`. Add `&refresh=1` to any route to bypass the cache (slower; use sparingly).
 
@@ -266,15 +268,15 @@ curl -s -H "Authorization: Bearer $KEY" 'https://b2c.clovermarketing.ai/api/v1/c
 =IMPORTDATA("https://b2c.clovermarketing.ai/api/v1/clients?format=csv&api_key=PASTE_KEY")
 ```
 
-Sheets refreshes `IMPORTDATA` roughly hourly. Anyone who can read the sheet can see the formula and therefore the key; keep such sheets private, or use an Apps Script `UrlFetchApp.fetch(url, { headers: { Authorization: 'Bearer ' + key } })` with the key in Script Properties. For the flat metrics (one row per metric with today/L7D/L30D/MTD columns) use Apps Script to fetch `/api/v1/metrics?format=flat` and write `rows` to a sheet; `IMPORTDATA` does not parse JSON.
+Sheets refreshes `IMPORTDATA` roughly hourly. This is the one place the key has to travel in the URL (see the warning above): anyone who can read the sheet can see the formula and therefore the key, and the URL is logged on the way. Keep such sheets private, or better, use an Apps Script `UrlFetchApp.fetch(url, { headers: { Authorization: 'Bearer ' + key } })` with the key in Script Properties, which keeps it out of the URL and out of the sheet. For the flat metrics (one row per metric with today/L7D/L30D/MTD columns) use Apps Script to fetch `/api/v1/metrics?format=flat` and write `rows` to a sheet; `IMPORTDATA` does not parse JSON.
 
 ### n8n
 
-Use an **HTTP Request** node: Method `GET`, URL `https://b2c.clovermarketing.ai/api/v1/metrics?format=flat`, Authentication → *Generic Credential Type* → *Header Auth* with name `Authorization` and value `Bearer <key>` (store the key as a credential, not in the URL). Response format JSON; a following *Split Out* node on `rows` gives one item per metric. For a daily push to a sheet or Slack, run the node on a Schedule trigger after 07:00 Toronto (the Vercel cron warms the cache at 06:45), and read `/api/v1/daily?from={{ $today.minus(1,'days') }}&to={{ $today.minus(1,'days') }}` for yesterday's row.
+Use an **HTTP Request** node: Method `GET`, URL `https://b2c.clovermarketing.ai/api/v1/metrics?format=flat`, Authentication → *Generic Credential Type* → *Header Auth* with name `Authorization` and value `Bearer <key>` (store the key as a credential, not in the URL). Response format JSON; a following *Split Out* node on `rows` gives one item per metric. For a daily push to a sheet or Slack, run the node on a Schedule trigger in the morning Toronto time (yesterday's numbers are complete by then; the Vercel snapshot cron runs at 10:45 UTC, 06:45 EDT / 05:45 EST, but nothing in the API depends on it), and read `/api/v1/daily?from={{ $today.minus(1,'days') }}&to={{ $today.minus(1,'days') }}` for yesterday's row.
 
 ### Grow / BI tools
 
-Point a REST/JSON or CSV connector at `/api/v1/daily?format=csv` (history, one row per day) or `/api/v1/metrics?format=flat` (current values) with the `Authorization: Bearer` header, or the `api_key` parameter if the tool cannot send headers. For history beyond 92 days, connect the tool to the Airtable *Dashboard Snapshots* table instead: it accumulates a row per metric per day from the cron.
+Point a REST/JSON or CSV connector at `/api/v1/daily?format=csv` (history, one row per day) or `/api/v1/metrics?format=flat` (current values) with the `Authorization: Bearer` header (fall back to the `api_key` parameter only if the tool really cannot send headers; see the warning at the top of this section). For history beyond 92 days, connect the tool to the Airtable *Dashboard Snapshots* table instead: it accumulates a row per metric per day from the cron.
 
 ---
 
@@ -286,38 +288,37 @@ Point a REST/JSON or CSV connector at `/api/v1/daily?format=csv` (history, one r
 { "crons": [ { "path": "/api/cron/refresh", "schedule": "45 10 * * *" } ] }
 ```
 
-Cron schedules are UTC, so `45 10 * * *` is 06:45 Toronto in summer (EDT) and 05:45 in winter (EST). Vercel calls `GET /api/cron/refresh` with `Authorization: Bearer <CRON_SECRET>`; set `CRON_SECRET` in the project and Vercel sends it automatically. The route also accepts `DASHBOARD_API_KEY`, so you can trigger it by hand or from n8n:
+Cron schedules are UTC, so `45 10 * * *` is **06:45 Toronto in summer (EDT) and 05:45 in winter (EST)**; it does not follow daylight-saving time. Vercel calls `GET /api/cron/refresh` with `Authorization: Bearer <CRON_SECRET>`; set `CRON_SECRET` in the project and Vercel sends it automatically. The route accepts **only** `CRON_SECRET`: the read-only `DASHBOARD_API_KEY` is not enough, because the cron writes to Airtable. To trigger it by hand or from n8n, send the cron secret:
 
 ```bash
-curl -s -H "Authorization: Bearer $KEY" https://b2c.clovermarketing.ai/api/cron/refresh
+curl -s -H "Authorization: Bearer $CRON_SECRET" https://b2c.clovermarketing.ai/api/cron/refresh
 # -> { ok: true, ms: 4210, today: "2026-09-30", sources: { ads: { status: "ok", … }, … }, snapshot: "written", snapshotWritten: 44, warnings: [] }
 ```
 
 What it does:
 
-1. Rebuilds every source with `refresh=true`, so the first human load of the day is instant.
-2. If a **"Dashboard Snapshots"** table exists in `AIRTABLE_DASHBOARD_BASE`, appends one record per CEO row and per primary (bold) row of every section, for `Range = today` and `Range = mtd`: `{ Date, Metric, Range, Value, Generated At }`. Null values are skipped. The token needs `data.records:write` on the base.
+1. **Writes the daily snapshot.** If a **"Dashboard Snapshots"** table exists in `AIRTABLE_DASHBOARD_BASE`, it appends one record per CEO row and per primary (bold) row of every section: `{ Date, Metric, Range, Value, Generated At }`. Because it runs early in the morning it does not store a partial "today". It stores **yesterday's complete day** (`Range = yesterday`, dated yesterday) and **month to date as of the run** (`Range = mtd`, dated the run day); on the 1st the MTD row covers only the hours since midnight. Null values are skipped. The token needs `data.records:write` (to append) and `schema.bases:read` (to check that the table exists) on the base. This is the cron's real job: it is the only thing that builds the history the *Dashboard Snapshots* table holds.
+2. **Rebuilds every source with `refresh=true`** to produce that payload, which doubles as a daily health check: the response lists every source's status, and Vercel → Project → Cron Jobs keeps each run's response. It also fills the memory cache, but only on the serverless instance that served the cron; Vercel usually recycles that instance before anyone opens the dashboard, so do not count on the cron to make the first human load of the day fast. A cold instance simply pulls every source again (a few seconds).
 
-`snapshot` in the response is one of `written`, `no_table` (create it with `POST /api/setup`), `unconfigured` (no `AIRTABLE_API_KEY`), `error` (the message is in `warnings`), `skipped`. A snapshot failure never fails the refresh. Vercel → Project → Cron Jobs shows each run and its response.
-
-Because the memory cache lives per serverless instance, the warm-up benefits the instance that served the cron; a cold instance simply fetches again (a few seconds).
+`snapshot` in the response is one of `written`, `no_table` (create it with `POST /api/setup`), `unconfigured` (no `AIRTABLE_API_KEY`), `error` (the message is in `warnings`), `skipped`. A snapshot failure never fails the refresh.
 
 ---
 
 ## 8. Caching and Refresh
 
-Every source pull is memoised in memory per serverless instance with stale-while-revalidate semantics:
+Every source pull is memoised in memory per serverless instance. The rules are deliberately simple, because a Vercel function cannot keep working after it has sent its response (there is no background refresh):
 
-- Younger than `DASHBOARD_CACHE_TTL` seconds (default 180): served from memory.
-- Older than the TTL but younger than 4× TTL: served immediately **and** refreshed in the background; the Data sources panel shows *stale* until the next load.
-- Older than that, or never pulled: fetched and awaited.
-- An upstream failure keeps serving the last good value, marked *stale* with the error attached, instead of blanking the dashboard.
+- **Fresh** (younger than `DASHBOARD_CACHE_TTL` seconds, default 180): served from memory, no upstream call. The Data sources panel shows *ok*.
+- **Expired** (older than the TTL) or never pulled: re-fetched **synchronously**; the request waits for the upstream call and gets the new value. The panel shows *ok*.
+- **Re-fetch failed**: only then is the last good value served, marked *stale* with the error attached, instead of blanking the dashboard. The panel shows *stale* and `error` says why. With no earlier good value the source is reported as *error* and its rows are dashes.
+- Concurrent requests for the same source share one in-flight upstream call, so a burst of page loads never multiplies upstream traffic.
+- Entries older than 4× the TTL (12 minutes by default) are evicted on the next cache access, and the store is capped at 200 entries (oldest first), so a long-lived instance does not accumulate one dataset per day. The stale fallback therefore only exists while the last good pull is younger than that; after it, a failing source is reported as *error*.
 
 Ways to bypass it:
 
 - The **Refresh** button on the dashboard, which calls `GET /api/metrics?refresh=1`.
 - `?refresh=1` on any `/api/v1/*` route.
-- The daily cron (always `refresh=true`).
+- The daily cron (always `refresh=true`; it fills the cache only on the instance that served it, see [section 7](#7-vercel-cron-and-daily-snapshots)).
 
 `GET /api/metrics?demo=1` renders synthetic data in the exact live shapes, useful for checking the UI without keys.
 
@@ -331,8 +332,8 @@ The panel at the bottom of the dashboard (and `payload.sources` in the API) list
 
 | Status | Meaning | What to do |
 |---|---|---|
-| `ok` | Pulled successfully within the TTL. | Nothing. |
-| `stale` | Serving the last good pull; the latest attempt failed or is still running in the background. The `error` field has the reason. | Press Refresh. If it stays stale, read `error`: an expired token, a 429 rate limit, a timeout (Windsor 40 s, Whop 30 s, Airtable 25 s per page). |
+| `ok` | Pulled successfully: either served from memory within the TTL or just re-fetched. | Nothing. |
+| `stale` | The cache had expired, the re-fetch failed, and the last good pull is being served instead. The `error` field has the reason. | Press Refresh. If it stays stale, read `error`: an expired token, a 429 rate limit, a timeout (Windsor 40 s, Whop 30 s, Airtable 25 s per page). |
 | `unconfigured` | The env var(s) the source needs are unset, or the table does not exist. The `hint` names the variable or the table. | Set the variable in Vercel and redeploy, or run `POST /api/setup` for the dashboard tables. |
 | `error` | The pull failed and there is no earlier good value to fall back on. `error` has the upstream message. | See below by source. |
 | `demo` | `?demo=1` synthetic data. | Remove `demo=1`. |
@@ -342,7 +343,7 @@ The panel at the bottom of the dashboard (and `payload.sources` in the API) list
 - **Facebook ads (Windsor.ai)** — `401`/`403`: bad `WINDSOR_API_KEY`. *response has no data array*: Windsor answered with an error body; check the account is connected in Windsor. Spend in *Unclassified ads*: fix the campaign name or add an `ADS_LINE_RULES` entry. *campaign … is not in lib/clients.js*: add the client to the rate card so its leads join.
 - **Home Service leads / clients / prospects / Closer EOD (Airtable)** — `401` `AUTHENTICATION_REQUIRED`: token invalid. `403` `NOT_AUTHORIZED`: the token was not granted this base. `404` `TABLE_NOT_FOUND`: a table id override is wrong. `422` `INVALID_FILTER_BY_FORMULA`: a field name the filter uses is missing (the prospect pull tries narrower formulas automatically and warns). *Lead Cost the dashboard does not recognise*: add the value to the select or rename it to a price / `Free` / `Replacement` / `Prepay` / `Unbilled`. A hit on the 20,000-record cap is reported as a warning, never truncated silently.
 - **Whop payments** — `401`: key invalid or lacks payment read permission. Empty with a valid key: check `WHOP_COMPANY_ID` is the `biz_…` id. Numbers 100× too big: set `WHOP_AMOUNTS_IN_CENTS=1`. *fees are only reported for N of M payments*: Whop omitted `amount_after_fees` on some payments; the fees row is understated.
-- **Dashboard Costs / Targets (Airtable)** — `unconfigured` with a table hint: run `POST /api/setup`. *metrics the dashboard does not know*: the `Metric` cell is not a row id; copy it from METRICS.md. *Month must be YYYY-MM*: fix the `Month` cell.
+- **Dashboard Costs / Targets (Airtable)** — `unconfigured` with a table hint: run `POST /api/setup`. `GET /api/setup` answering `502`, or the cron reporting `no_table` although the table exists: the token lacks `schema.bases:read`. *metrics the dashboard does not know*: the `Metric` cell is not a row id; copy it from METRICS.md. *Month must be YYYY-MM*: fix the `Month` cell.
 - **Tax B2B CRM (Airtable)** — `unconfigured`: set `AIRTABLE_CRM_BASE` (and `AIRTABLE_TOKEN` if the CRM base is under another token). *no "Date Added" field*: leads are dated by `createdTime` instead. *no prospect has ever been marked Showed/No Show*: shows are inferred from closes only until the team uses the Showed stage.
 - **Retainer clients (lib/clients.js)** — never fails; edit the file to add a client, change a rate, or set `paused: true`.
 
@@ -353,5 +354,5 @@ The panel at the bottom of the dashboard (and `payload.sources` in the API) list
 - **Leads count differs from Airtable by one day at the edges** — the dashboard dates leads by their `createdTime` converted to `DASHBOARD_TZ`; an Airtable view in another timezone (or in UTC) will differ around midnight. Both are right for their own zone.
 - **Facebook-reported leads ≠ Airtable leads** — expected; `fb_leads` is Meta's count and is shown for reconciliation only. Billed leads come from Airtable.
 - **CEO section missing** — `CEO_PASSWORD` is set and this browser has not unlocked it in the last 12 hours; use the Unlock control or `POST /api/ceo`.
-- **Slow first load** — a cold serverless instance pulls every source (typically 3–8 s). The cron warm-up at 06:45 and the 180 s cache keep later loads fast; a `stale` marker means you got the cached copy while a refresh ran.
-- **Cron did not run** — Vercel → Project → Settings → Cron Jobs must show the job from `vercel.json` (crons only deploy from the Production branch). `401` in the cron log: `CRON_SECRET` is unset or differs from what Vercel sends.
+- **Slow first load** — a cold serverless instance pulls every source (typically 3–8 s). The 180 s cache keeps later loads on the same instance fast; the 10:45 UTC cron warms only the instance that served it, which is usually gone by the time someone opens the dashboard, so the first load of the day is normally a cold one. A `stale` marker means the latest re-fetch failed and you are seeing the last good copy (`error` says why).
+- **Cron did not run** — Vercel → Project → Settings → Cron Jobs must show the job from `vercel.json` (crons only deploy from the Production branch). `401` in the cron log: `CRON_SECRET` is unset or differs from what Vercel sends (the route accepts no other credential). `snapshot: "no_table"` every day although the table exists: the token lacks `schema.bases:read`.

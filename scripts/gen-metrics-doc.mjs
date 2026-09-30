@@ -115,7 +115,7 @@ export function buildDoc() {
   p('- **Row id** is the stable identifier. It is the `Metric` value in the Airtable *Dashboard Targets* table, the `ids=` value for `GET /api/v1/daily`, and the `id` in `GET /api/v1/metrics?format=flat`. Some ids appear in more than one section on purpose (for example `replacement_rate` and `hs_billed_value`); they are the same number.');
   p('- **Label** is what the UI prints. Bold rows are the *primary* rows: the ones read first, and the ones the daily snapshot captures.');
   p('- **Unit**: `currency` (dollars, two decimals), `count`, `percent` (0–100, not a fraction), `ratio (x)`, `seconds`, `decimal`.');
-  p('- **Better**: whether a higher or a lower number is good. *Context only* rows carry no judgement (their status is always `partial`).');
+  p('- **Better**: whether a higher or a lower number is good. *Context only* rows carry no judgement: their status is `partial` when a monthly target is stored for them and `set_target` otherwise (a target on such a row is optional and only ever yields `partial`).');
   p('- **Accumulates?**: *Yes* for sums that grow through the month (spend, leads, cash), so pace compares against the share of the monthly target that should be reached by today. *No* for rates and averages, which compare straight against the target.');
   p('- **Needs**: the data sources the row depends on. If any of them is unconfigured or failed, the row is `null` (shown as a dash), never 0.');
   p('- Every rate is computed from **sums over the range**, never as an average of daily rates. Division by zero yields `null` (not computable), never 0.');
@@ -197,7 +197,7 @@ export function buildDoc() {
   p('   - higher-is-better rows: `pace = actual ÷ expected`');
   p('   - lower-is-better rows (costs, CPL, replacement rate, speed to lead): **inverted**, `pace = expected ÷ actual`. Spending $800 against an expected $1,000 is a pace of 1.25, ahead.');
   p('   - edge cases: when `expected` is 0, pace is 1 if `actual` is also 0, otherwise 0 for a lower-is-better row and ∞ for a higher-is-better row; a lower-is-better row with `actual` 0 has pace ∞.');
-  p('   - context-only rows (`dir` = none) get no pace; their status is `partial`.');
+  p('   - context-only rows (`dir` = none) get no pace; their status is `partial` when a target is stored and `set_target` when it is not.');
   p('3. **Status** is the first band whose minimum the pace reaches:');
   p();
   p(statusTable());

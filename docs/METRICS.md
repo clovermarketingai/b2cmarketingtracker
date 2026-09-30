@@ -9,7 +9,7 @@ Every row the Command Center shows, with its exact definition. The formulas are 
 - **Row id** is the stable identifier. It is the `Metric` value in the Airtable *Dashboard Targets* table, the `ids=` value for `GET /api/v1/daily`, and the `id` in `GET /api/v1/metrics?format=flat`. Some ids appear in more than one section on purpose (for example `replacement_rate` and `hs_billed_value`); they are the same number.
 - **Label** is what the UI prints. Bold rows are the *primary* rows: the ones read first, and the ones the daily snapshot captures.
 - **Unit**: `currency` (dollars, two decimals), `count`, `percent` (0–100, not a fraction), `ratio (x)`, `seconds`, `decimal`.
-- **Better**: whether a higher or a lower number is good. *Context only* rows carry no judgement (their status is always `partial`).
+- **Better**: whether a higher or a lower number is good. *Context only* rows carry no judgement: their status is `partial` when a monthly target is stored for them and `set_target` otherwise (a target on such a row is optional and only ever yields `partial`).
 - **Accumulates?**: *Yes* for sums that grow through the month (spend, leads, cash), so pace compares against the share of the monthly target that should be reached by today. *No* for rates and averages, which compare straight against the target.
 - **Needs**: the data sources the row depends on. If any of them is unconfigured or failed, the row is `null` (shown as a dash), never 0.
 - Every rate is computed from **sums over the range**, never as an average of daily rates. Division by zero yields `null` (not computable), never 0.
@@ -22,7 +22,7 @@ Cash in, every tracked cost, and what is left. Costs that are not tracked anywhe
 
 | Row id | Label | Unit | Better | Accumulates? | Needs | Formula |
 |---|---|---|---|---|---|---|
-| `cash_collected` | **Cash collected** | currency | Higher | Yes | Whop payments | Σ Whop payment total where status is paid, by the local date of paid_at |
+| `cash_collected` | **Cash collected** | currency | Higher | Yes | Whop payments | Σ Whop payment total for payments with status paid, partially refunded or refunded (gross, before refunds), by the local date of paid_at (created_at when unpaid) |
 | `refunds` | Refunds | currency | Lower | Yes | Whop payments | Σ Whop refunded_amount, attributed to the payment's paid_at date |
 | `tracked_costs` | **Tracked costs** | currency | Lower | Yes | Facebook ads (Windsor.ai), Dashboard Costs (Airtable) | ad spend (all lines) + processor fees + messaging + affiliates + software + other + payroll + personal projects |
 | `profit_business` | **Known profit after business costs** | currency | Higher | Yes | Whop payments, Facebook ads (Windsor.ai), Dashboard Costs (Airtable) | cash collected − refunds − (ad spend + processor fees + messaging + affiliates + software + other) |
@@ -87,8 +87,8 @@ Closer EOD reports plus the Prospect table. Client-acquisition ad spend gives co
 | `new_prospects` | New prospects | count | Higher | Yes | Prospects (Airtable) | count of Prospect records created in range (local date of Created At) |
 | `booked_calls` | **Calls booked** | count | Higher | Yes | Prospects (Airtable) | count of prospects whose Appointment Date falls in range |
 | `book_rate` | Prospect to booked | percent | Higher | No | Prospects (Airtable) | prospects created in range that have any Appointment Date ÷ new prospects |
-| `prospect_contact_rate` | Prospects contacted | percent | Higher | No | Prospects (Airtable) | prospects created in range whose Status is not Hotlist / Follow Up ÷ new prospects |
-| `speed_to_lead` | Speed to lead (avg) | seconds | Lower | No | Prospects (Airtable) | mean "Speed to Lead (sec)" over prospects created in range that were called |
+| `prospect_contact_rate` | Prospects contacted | percent | Higher | No | Prospects (Airtable) | prospects created in range with a Status that is set and is not Hotlist / Follow Up ÷ new prospects |
+| `speed_to_lead` | Speed to lead (avg) | seconds | Lower | No | Prospects (Airtable) | mean "Speed to Lead (sec)" over prospects created in range that have a value in that field |
 | `hs_b2b_spend` | Client-acquisition ad spend | currency | Lower | Yes | Facebook ads (Windsor.ai) | Σ spend of hs_b2b campaigns |
 | `hs_b2b_leads` | Client-acquisition FB leads | count | Higher | Yes | Facebook ads (Windsor.ai) | Σ actions_lead of hs_b2b campaigns |
 | `hs_b2b_cpl` | Cost per acquisition lead | currency | Lower | No | Facebook ads (Windsor.ai) | hs_b2b spend ÷ hs_b2b FB leads |
@@ -229,7 +229,7 @@ A monthly target for a row is a record in the Airtable *Dashboard Targets* table
    - higher-is-better rows: `pace = actual ÷ expected`
    - lower-is-better rows (costs, CPL, replacement rate, speed to lead): **inverted**, `pace = expected ÷ actual`. Spending $800 against an expected $1,000 is a pace of 1.25, ahead.
    - edge cases: when `expected` is 0, pace is 1 if `actual` is also 0, otherwise 0 for a lower-is-better row and ∞ for a higher-is-better row; a lower-is-better row with `actual` 0 has pace ∞.
-   - context-only rows (`dir` = none) get no pace; their status is `partial`.
+   - context-only rows (`dir` = none) get no pace; their status is `partial` when a target is stored and `set_target` when it is not.
 3. **Status** is the first band whose minimum the pace reaches:
 
 | Status | Label | Tone | When |

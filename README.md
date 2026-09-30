@@ -31,7 +31,7 @@ Minimum variables to run: `APP_PASSWORD`, `SESSION_SECRET`, `WINDSOR_API_KEY`, `
 |---|---|
 | `npm run dev` | Next.js dev server. |
 | `npm run build` / `npm start` | Production build and server. |
-| `npm test` | Every `test/*.test.js` suite with `node --test` (pure normalisers and the aggregation engine, no network). |
+| `npm test` | Every `test/*.test.js` suite with `node --test` (pure normalisers, the aggregation engine, auth, the cache and the loader; no network). |
 | `npm run docs` | Regenerates `docs/METRICS.md` from `lib/dashboard/catalog.js`. Run it after changing a metric; `node scripts/gen-metrics-doc.mjs --check` fails when the file is out of date. |
 
 ## Documentation
@@ -49,7 +49,7 @@ lib/dashboard/load.js      pulls every source through the cache and builds the p
 lib/auth.js, middleware.js session cookie, CEO unlock, API key and cron secret
 pages/api/metrics.js       GET /api/metrics — the payload the page renders
 pages/api/v1/*             external read API (metrics, daily, clients)
-pages/api/cron/refresh.js  daily warm-up + Airtable snapshot
+pages/api/cron/refresh.js  daily Airtable snapshot (yesterday + MTD) and source health check
 pages/api/setup.js, ceo.js create the dashboard tables; CEO unlock
 ```
 
@@ -57,7 +57,7 @@ pages/api/setup.js, ceo.js create the dashboard tables; CEO unlock
 
 1. Import the repository in Vercel (Next.js is detected; no build settings needed).
 2. Add the environment variables from [docs/SETUP.md](docs/SETUP.md) for Production and Preview.
-3. Deploy. `vercel.json` registers the daily `/api/cron/refresh` job (06:45 Toronto); set `CRON_SECRET` so Vercel can authenticate it.
+3. Deploy. `vercel.json` registers the daily `/api/cron/refresh` job at 10:45 UTC (06:45 Toronto in summer, 05:45 in winter; cron schedules do not follow DST, see docs/SETUP.md §7); set `CRON_SECRET` so Vercel can authenticate it (it is the only credential the route accepts).
 4. Sign in, run `POST /api/setup` once to create the *Dashboard Costs*, *Dashboard Targets* and *Dashboard Snapshots* tables, then add your monthly costs and targets in Airtable.
 
 Pushes to the production branch redeploy automatically.
