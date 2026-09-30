@@ -18,7 +18,7 @@ export function MetricCell({ row, series, sparkId }) {
   const unavailable = isUnavailable(row);
   const values = sparkId && series && Array.isArray(series[sparkId]) ? series[sparkId] : null;
   return (
-    <td title={unavailable ? unavailableTitle(row) : row.formula || undefined}>
+    <th scope="row" title={unavailable ? unavailableTitle(row) : row.formula || undefined}>
       <div className="cc-metric">
         <span className="cc-metric-label">
           {row.label}
@@ -26,7 +26,7 @@ export function MetricCell({ row, series, sparkId }) {
         </span>
         {values && !unavailable ? <Sparkline values={values} dates={series.dates || []} unit={row.unit} label={`${row.label}, last 30 days`} /> : null}
       </div>
-    </td>
+    </th>
   );
 }
 
@@ -41,18 +41,29 @@ export function ValueCell({ row, rangeId, selected = false, blank = false, title
   );
 }
 
+// Good/bad glyphs for a delta, matching the StatusPill vocabulary (check = good,
+// cross = bad). They are deliberately not up/down arrows: on a lower-is-better
+// row "-12.3%" is good, so an arrow would contradict the sign.
+const DELTA_GLYPH = { good: '\u2713', bad: '\u2715' };
+
 /** Delta vs the previous period for the selected range. */
 export function DeltaCell({ row, rangeId }) {
   if (isUnavailable(row)) return <td className="cc-num" title={unavailableTitle(row)}>{DASH}</td>;
   const cur = row.values?.[rangeId];
   const prev = row.prev?.[rangeId];
   const d = formatDelta(cur, prev, row.unit, row.dir);
-  const title = prev == null
+  const judged = d.tone === 'good' ? 'better' : d.tone === 'bad' ? 'worse' : null;
+  const base = prev == null
     ? 'No previous period value'
     : `Previous period: ${formatValue(prev, row.unit)}${d.diff != null ? ` (${d.abs})` : ''}`;
+  const title = judged ? `${base} \u00b7 ${judged} than previous` : base;
   return (
     <td className="cc-num" title={title}>
-      <span className={`cc-delta ${d.tone}`}>{d.text}</span>
+      <span className={`cc-delta ${d.tone}`}>
+        {judged ? <span className="cc-glyph" aria-hidden="true">{DELTA_GLYPH[d.tone]}</span> : null}
+        {d.text}
+        {judged ? <span className="cc-sr"> ({judged})</span> : null}
+      </span>
     </td>
   );
 }
@@ -73,7 +84,12 @@ export function PaceCell({ row }) {
   const title = row.expected == null
     ? 'Pace needs a monthly target'
     : `${row.cumulative ? 'Expected by today' : 'Target'}: ${formatValue(row.expected, row.unit)} · MTD ${formatValue(row.values?.mtd, row.unit)}`;
-  return <td className="cc-num" title={title}>{formatPace(row.pace)}</td>;
+  const infinite = row.paceInfinite === true || row.pace === Infinity;
+  return (
+    <td className="cc-num" title={infinite ? `${title} \u00b7 nothing expected yet, or lower-is-better with 0 actual` : title}>
+      {infinite ? '\u221e' : formatPace(row.pace)}
+    </td>
+  );
 }
 
 /** Goal status pill from the payload's statusLabel / tone. */

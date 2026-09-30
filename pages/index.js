@@ -11,6 +11,7 @@ import SourcesPanel from '../components/dashboard/SourcesPanel.js';
 import UnlockCard from '../components/dashboard/UnlockCard.js';
 import Formulas from '../components/dashboard/Formulas.js';
 import StatusPill, { healthPill } from '../components/dashboard/StatusPill.js';
+import { withDemo, useDemoQuery } from '../components/dashboard/nav.js';
 
 const DEFAULT_RANGE = 'mtd';
 const RANGE_STORAGE_KEY = 'cc.range';
@@ -96,6 +97,7 @@ export default function CommandCenter() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [range, setRange] = useState(DEFAULT_RANGE);
+  const demoQuery = useDemoQuery(); // keep ?demo=1 on the page links
 
   const load = useCallback(async ({ refresh = false } = {}) => {
     if (refresh) setRefreshing(true); else setLoading(true);
@@ -173,8 +175,8 @@ export default function CommandCenter() {
             </div>
           </div>
           <nav className="cc-nav" aria-label="Command Center pages">
-            <a href="/" className="on">Command Center</a>
-            <a href="/daily">Daily breakdown</a>
+            <a href={withDemo('/', demoQuery)} className="on">Command Center</a>
+            <a href={withDemo('/daily', demoQuery)}>Daily breakdown</a>
             <a href="#sources">Data sources</a>
           </nav>
           <div className="cc-top-right">

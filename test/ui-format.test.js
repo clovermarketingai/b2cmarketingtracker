@@ -35,6 +35,46 @@ test('formatValue: seconds', () => {
   assert.equal(formatSeconds(3599.7), '1 hr');
 });
 
+test('formatSeconds rounds to whole minutes before choosing the unit', () => {
+  // 3570-3599 s round to 60 min, which is "1 hr", never "60 min"
+  assert.equal(formatSeconds(3570), '1 hr');
+  assert.equal(formatSeconds(3599), '1 hr');
+  assert.equal(formatSeconds(3569), '59 min');
+  assert.equal(formatSeconds(3600), '1 hr');
+  assert.equal(formatSeconds(3629), '1 hr');
+  assert.equal(formatSeconds(3630), '1 hr 1 min');
+  assert.equal(formatSeconds(5399), '1 hr 30 min');
+  // 59 min 30 s past the hour rolls over to the next hour
+  assert.equal(formatSeconds(7170), '2 hr');
+  assert.equal(formatSeconds(59.4), '59 sec');
+  assert.equal(formatSeconds(59.5), '1 min');
+});
+
+test('formatValue / formatCurrency never print a negative zero', () => {
+  assert.equal(formatValue(-0, 'number'), '0');
+  assert.equal(formatValue(-0, 'percent'), '0.0%');
+  assert.equal(formatValue(-0.001, 'currency'), '$0.00');
+  assert.equal(formatValue(-0.001, 'currency', { compact: true }), '$0.00');
+  assert.equal(formatValue(-0.04, 'percent'), '0.0%');
+  assert.equal(formatValue(-0.04, 'ratio'), '0.0x');
+  assert.equal(formatValue(-0.04, 'decimal'), '0.0');
+  assert.equal(formatValue(-0.004, 'number'), '0');
+  assert.equal(formatCurrency(-0), '$0.00');
+  // real negatives keep their sign
+  assert.equal(formatValue(-0.05, 'percent'), '-0.1%');
+  assert.equal(formatValue(-0.005, 'currency'), '-$0.01');
+  assert.equal(formatValue(-12.5, 'number'), '-12.5');
+});
+
+test('compact magnitudes roll over at the boundary', () => {
+  assert.equal(formatValue(999999, 'currency', { compact: true }), '$1M');
+  assert.equal(formatValue(999950, 'number', { compact: true }), '1M');
+  assert.equal(formatValue(999949, 'number', { compact: true }), '999.9K');
+  assert.equal(formatValue(999999999, 'currency', { compact: true }), '$1B');
+  assert.equal(formatValue(10000, 'number', { compact: true }), '10K');
+  assert.equal(formatValue(-250814, 'number', { compact: true }), '-250.8K');
+});
+
 test('formatValue: null, undefined, NaN, garbage -> em dash', () => {
   assert.equal(formatValue(null, 'currency'), DASH);
   assert.equal(formatValue(undefined, 'number'), DASH);
@@ -73,6 +113,21 @@ test('formatDelta: percent-unit rows show point difference', () => {
   assert.equal(formatDelta(10, 12.5, 'percent', 'lower').text, '-2.5 pts');
 });
 
+test('formatDelta: percent-unit rows still show the point difference when prev is exactly 0', () => {
+  const d = formatDelta(20, 0, 'percent', 'higher');
+  assert.equal(d.text, '+20.0 pts');
+  assert.equal(d.abs, '+20.0 pts');
+  assert.equal(d.tone, 'good');
+  assert.equal(d.pct, null); // no relative base
+  assert.equal(d.diff, 20);
+  assert.equal(formatDelta(5, 0, 'percent', 'lower').tone, 'bad');
+  const flat = formatDelta(0, 0, 'percent', 'higher');
+  assert.equal(flat.text, '0.0 pts');
+  assert.equal(flat.tone, 'neutral');
+  // a truly missing prev is still a dash
+  assert.equal(formatDelta(20, null, 'percent', 'higher').text, DASH);
+});
+
 test('formatDelta: neutral when prev is 0 or null, or value missing', () => {
   for (const prev of [0, null, undefined, NaN, '']) {
     const d = formatDelta(50, prev, 'currency', 'higher');
@@ -80,9 +135,32 @@ test('formatDelta: neutral when prev is 0 or null, or value missing', () => {
     assert.equal(d.text, DASH);
     assert.equal(d.pct, null);
   }
+  // prev 0 has no relative base, but the absolute difference is still known for the tooltip
+  const fromZero = formatDelta(50, 0, 'currency', 'higher');
+  assert.equal(fromZero.abs, '+$50.00');
+  assert.equal(fromZero.diff, 50);
+  assert.equal(formatDelta(50, null, 'currency', 'higher').abs, DASH);
   assert.equal(formatDelta(null, 100, 'currency', 'higher').tone, 'neutral');
   // negative previous still yields a sensible relative change
   assert.equal(formatDelta(-50, -100, 'currency', 'higher').text, '+50.0%');
+});
+
+test('formatDelta: sign and tone follow the rounded text', () => {
+  // a floating residue that prints as 0.0 is neutral, with no sign
+  for (const [v, p, unit] of [[100.00001, 100, 'currency'], [99.99999, 100, 'number'], [0.1 + 0.2, 0.3, 'number'], [50.04, 50, 'percent'], [49.96, 50, 'percent']]) {
+    const d = formatDelta(v, p, unit, 'higher');
+    assert.equal(d.text, unit === 'percent' ? '0.0 pts' : '0.0%', `${v} vs ${p}`);
+    assert.equal(d.tone, 'neutral', `${v} vs ${p}`);
+    assert.notEqual(d.text[0], '-');
+    assert.notEqual(d.text[0], '+');
+  }
+  // the first value that rounds to a non-zero digit gets a sign and a tone
+  assert.deepEqual([formatDelta(100.06, 100, 'currency', 'higher').text, formatDelta(100.06, 100, 'currency', 'higher').tone], ['+0.1%', 'good']);
+  assert.deepEqual([formatDelta(99.94, 100, 'currency', 'higher').text, formatDelta(99.94, 100, 'currency', 'higher').tone], ['-0.1%', 'bad']);
+  assert.deepEqual([formatDelta(50.06, 50, 'percent', 'lower').text, formatDelta(50.06, 50, 'percent', 'lower').tone], ['+0.1 pts', 'bad']);
+  // abs uses the same rule: a diff that prints as zero carries no sign
+  assert.equal(formatDelta(100.001, 100, 'currency', 'higher').abs, '$0.00');
+  assert.equal(formatDelta(99.999, 100, 'currency', 'higher').abs, '$0.00');
 });
 
 test('formatSignedValue by unit', () => {
@@ -91,6 +169,13 @@ test('formatSignedValue by unit', () => {
   assert.equal(formatSignedValue(90, 'seconds'), '+2 min');
   assert.equal(formatSignedValue(0, 'number'), '0');
   assert.equal(formatSignedValue(null, 'number'), DASH);
+  // sign follows the printed magnitude
+  assert.equal(formatSignedValue(0.001, 'currency'), '$0.00');
+  assert.equal(formatSignedValue(-0.04, 'percent'), '0.0 pts');
+  assert.equal(formatSignedValue(0.2, 'seconds'), '0 sec');
+  assert.equal(formatSignedValue(-0, 'number'), '0');
+  assert.equal(formatSignedValue(0.05, 'percent'), '+0.1 pts');
+  assert.equal(formatSignedValue(-0.005, 'currency'), '-$0.01');
 });
 
 test('formatPace', () => {
@@ -128,4 +213,25 @@ test('formatMs and toNumber', () => {
   assert.equal(toNumber('12.5%'), 12.5);
   assert.equal(toNumber(''), null);
   assert.equal(toNumber(Infinity), null);
+});
+
+test('toNumber rejects blank, hex and non-numeric strings', () => {
+  assert.equal(toNumber('  '), null);
+  assert.equal(toNumber('\t\n'), null);
+  assert.equal(toNumber('0x10'), null);
+  assert.equal(toNumber('0b11'), null);
+  assert.equal(toNumber('Infinity'), null);
+  assert.equal(toNumber('NaN'), null);
+  assert.equal(toNumber('abc'), null);
+  assert.equal(toNumber('1,2,3abc'), null);
+  assert.equal(toNumber('$'), null);
+  // still accepts the usual raw-cell shapes
+  assert.equal(toNumber(' 42 '), 42);
+  assert.equal(toNumber('-$1,234.50'), -1234.5);
+  assert.equal(toNumber('+7'), 7);
+  assert.equal(toNumber('.5'), 0.5);
+  assert.equal(toNumber('1e3'), 1000);
+  assert.equal(toNumber('1 234'), 1234);
+  assert.equal(toNumber(0), 0);
+  assert.equal(toNumber('0'), 0);
 });

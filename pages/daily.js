@@ -3,6 +3,7 @@ import Head from 'next/head';
 import { CSS } from '../components/dashboard/styles.js';
 import StatusPill, { sourceTone } from '../components/dashboard/StatusPill.js';
 import { formatValue, formatTimestamp, formatDay, DASH } from '../lib/dashboard/format.js';
+import { withDemo, useDemoQuery } from '../components/dashboard/nav.js';
 
 // All-time daily breakdown, one row per (date, client). Everything is computed
 // server-side by /api/daily (lib/dashboard/daily.js); this page only renders,
@@ -52,6 +53,7 @@ export default function DailyBreakdown() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [client, setClient] = useState('all');
+  const demoQuery = useDemoQuery();
 
   const load = useCallback(async ({ refresh = false } = {}) => {
     if (refresh) setRefreshing(true); else setLoading(true);
@@ -130,9 +132,9 @@ export default function DailyBreakdown() {
           </div>
           <div className="cc-top-right">
             <nav className="cc-nav" aria-label="Pages">
-              <a href="/">Command Center</a>
-              <a href="/daily" className="on">Daily breakdown</a>
-              <a href="/#sources">Data sources</a>
+              <a href={withDemo('/', demoQuery)}>Command Center</a>
+              <a href={withDemo('/daily', demoQuery)} className="on">Daily breakdown</a>
+              <a href={withDemo('/', demoQuery) + '#sources'}>Data sources</a>
             </nav>
             <span className="cc-asof">{loading ? 'Loading…' : data ? <>Data as of <b>{formatTimestamp(data.fetched_at, data.tz)}</b></> : null}</span>
             <button type="button" className="cc-btn" onClick={() => load({ refresh: true })} disabled={loading || refreshing}>{refreshing ? 'Refreshing…' : 'Refresh'}</button>
@@ -187,9 +189,9 @@ export default function DailyBreakdown() {
                   const dateBreak = i > 0 && rows[i - 1].date !== r.date;
                   return (
                     <tr key={`${r.date}|${r.client}`} style={dateBreak ? { boxShadow: 'inset 0 2px 0 #d9dce2' } : undefined}>
-                      <td>
+                      <th scope="row">
                         <div className="cc-metric"><span className="cc-metric-label"><b>{formatDay(r.date, { weekday: true })}</b><span className="cc-metric-note">{r.name}{r.campaigns > 1 ? ` · ${r.campaigns} campaigns` : ''}{r.unmapped ? ' · not in rate card' : ''}</span></span></div>
-                      </td>
+                      </th>
                       {COLUMNS.map(c => <Cell key={c.key} row={r} col={c} />)}
                     </tr>
                   );
@@ -198,7 +200,7 @@ export default function DailyBreakdown() {
               {totals && rows.length ? (
                 <tfoot>
                   <tr className="cc-primary">
-                    <td>Total · {totals.days} day{totals.days === 1 ? '' : 's'} · {totals.clients} client{totals.clients === 1 ? '' : 's'}</td>
+                    <th scope="row">Total · {totals.days} day{totals.days === 1 ? '' : 's'} · {totals.clients} client{totals.clients === 1 ? '' : 's'}</th>
                     {COLUMNS.map(c => <Cell key={c.key} row={totals} col={c} />)}
                   </tr>
                 </tfoot>

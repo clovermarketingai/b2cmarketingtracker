@@ -8,6 +8,8 @@ export const CSS = `
   --cc-page:#f4f5f7;--cc-card:#fff;--cc-line:#e5e7eb;--cc-ink:#141518;--cc-muted:#6b7280;
   --cc-dark:#0f172a;--cc-primary-wash:#e8f5ec;--cc-accent:#5b5bd6;
   --cc-good:#0ca30c;--cc-warning:#fab219;--cc-serious:#ec835a;--cc-critical:#d03b3b;--cc-neutral:#6b7280;
+  /* text-safe variants: >= 4.5:1 on white, the selected tint and the primary wash (dots/fills keep the ones above) */
+  --cc-good-text:#006300;--cc-critical-text:#a12626;
 }
 .cc{background:var(--cc-page);color:var(--cc-ink);font-family:system-ui,-apple-system,"Segoe UI",Inter,sans-serif;font-size:14px;line-height:1.45;min-height:100vh;-webkit-font-smoothing:antialiased;overflow-x:clip}
 .cc *{box-sizing:border-box}
@@ -43,7 +45,8 @@ export const CSS = `
 .cc-chip-dates{font-size:12px;color:var(--cc-muted);margin-left:4px}
 
 /* blocks */
-.cc-block{margin-top:18px;background:var(--cc-card);border:1px solid var(--cc-line);border-radius:12px;overflow:hidden}
+.cc-block{margin-top:18px;background:var(--cc-card);border:1px solid var(--cc-line);border-radius:12px;overflow:hidden;scroll-margin-top:120px}
+@media (max-width:719.98px){.cc-block{scroll-margin-top:104px}}
 .cc-head{background:var(--cc-dark);color:#fff;padding:12px 16px;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
 .cc-head h2{margin:0;font-size:14px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
 .cc-head p{margin:0;font-size:12.5px;color:#cbd5e1;flex:1 1 320px}
@@ -58,15 +61,24 @@ export const CSS = `
 .cc-tbl th,.cc-tbl td{padding:7px 10px;border-bottom:1px solid var(--cc-line);text-align:right;white-space:nowrap;vertical-align:middle;background:var(--cc-card)}
 .cc-tbl th{font-size:11.5px;font-weight:600;color:var(--cc-muted);text-transform:uppercase;letter-spacing:.04em;background:#f9fafb;border-bottom:1px solid #d9dce2}
 .cc-tbl th:first-child,.cc-tbl td:first-child{text-align:left;position:sticky;left:0;z-index:1;border-right:1px solid var(--cc-line);min-width:180px;max-width:260px;white-space:normal}
-.cc-tbl tbody tr:hover td{background:#fafbfc}
-.cc-tbl tr.cc-primary td{font-weight:700;background:var(--cc-primary-wash)}
-.cc-tbl tr.cc-primary:hover td{background:#dff0e4}
-.cc-tbl tr.cc-unavail td{color:var(--cc-muted);font-weight:400}
+/* row headers (the sticky metric / name column) look like body cells, not column headers */
+.cc-tbl tbody th{font-size:13px;font-weight:inherit;color:inherit;text-transform:none;letter-spacing:0;background:var(--cc-card);border-bottom:1px solid var(--cc-line)}
+.cc-tbl tbody tr:hover td,.cc-tbl tbody tr:hover th{background:#fafbfc}
+.cc-tbl tr.cc-primary td,.cc-tbl tr.cc-primary th{font-weight:700;background:var(--cc-primary-wash)}
+.cc-tbl tr.cc-primary:hover td,.cc-tbl tr.cc-primary:hover th{background:#dff0e4}
+.cc-tbl tr.cc-unavail td,.cc-tbl tr.cc-unavail th{color:var(--cc-muted);font-weight:400}
 .cc-tbl td.cc-sel{background:#f3f4ff}
 .cc-tbl tr.cc-primary td.cc-sel{background:#d8ecdd}
+/* hover must not wipe the selected-column tint: these outrank the tr:hover rules */
+.cc-tbl tbody tr:hover td.cc-sel{background:#e9ebff}
+.cc-tbl tr.cc-primary:hover td.cc-sel{background:#cfe6d5}
 .cc-tbl th.cc-sel{color:var(--cc-accent)}
-.cc-tbl th.cc-sortable{cursor:pointer;user-select:none}
+.cc-tbl th.cc-sortable{user-select:none}
 .cc-tbl th.cc-sortable:hover{color:var(--cc-ink)}
+/* the sort control is a real button that fills the header cell (negative margins cover the th padding) */
+.cc-tbl th .cc-sort-btn{all:unset;box-sizing:border-box;display:flex;align-items:center;justify-content:flex-end;width:calc(100% + 20px);margin:-7px -10px;padding:7px 10px;cursor:pointer;font:inherit;color:inherit;text-transform:inherit;letter-spacing:inherit;white-space:nowrap}
+.cc-tbl th.cc-text .cc-sort-btn{justify-content:flex-start}
+.cc-tbl th .cc-sort-btn:focus-visible{outline:2px solid var(--cc-accent);outline-offset:-2px;border-radius:4px}
 .cc-tbl th .cc-sort{font-size:9px;margin-left:3px;opacity:.7}
 .cc-tbl th .cc-hint{display:block;font-size:10px;font-weight:500;letter-spacing:0;text-transform:none;color:var(--cc-muted)}
 .cc-metric{display:flex;align-items:center;gap:8px;justify-content:space-between}
@@ -75,13 +87,14 @@ export const CSS = `
 .cc-dim{color:var(--cc-muted)}
 .cc-num{font-variant-numeric:tabular-nums}
 .cc-delta{font-weight:600}
-.cc-delta.good{color:var(--cc-good)}
-.cc-delta.bad{color:var(--cc-critical)}
+.cc-delta.good{color:var(--cc-good-text)}
+.cc-delta.bad{color:var(--cc-critical-text)}
 .cc-delta.neutral{color:var(--cc-muted);font-weight:400}
+.cc-delta .cc-glyph{font-size:10px;margin-right:3px}
 .cc-target-in{width:96px;height:26px;border:1px solid var(--cc-line);border-radius:6px;padding:0 6px;font:inherit;font-size:12.5px;text-align:right}
 .cc-empty{padding:18px 4px;color:var(--cc-muted);font-size:13px}
-.cc-tbl td.cc-name{font-weight:600}
-.cc-tbl td.cc-name small{display:block;font-weight:400;color:var(--cc-muted);font-size:11px}
+.cc-tbl td.cc-name,.cc-tbl th.cc-name{font-weight:600}
+.cc-tbl td.cc-name small,.cc-tbl th.cc-name small{display:block;font-weight:400;color:var(--cc-muted);font-size:11px}
 .cc-tbl td.cc-text{text-align:left}
 .cc-tbl th.cc-text{text-align:left}
 
@@ -132,7 +145,7 @@ export const CSS = `
 .cc-src-msg code{font-size:11.5px;background:#eef0f3;padding:1px 4px;border-radius:4px}
 
 /* formulas */
-.cc-formulas{margin-top:18px;background:var(--cc-card);border:1px solid var(--cc-line);border-radius:12px}
+.cc-formulas{margin-top:18px;background:var(--cc-card);border:1px solid var(--cc-line);border-radius:12px;scroll-margin-top:120px}
 .cc-formulas summary{cursor:pointer;padding:12px 16px;font-weight:600;font-size:14px;list-style:none;display:flex;align-items:center;gap:8px}
 .cc-formulas summary::-webkit-details-marker{display:none}
 .cc-formulas summary::before{content:"\\25B8";font-size:12px;color:var(--cc-muted)}

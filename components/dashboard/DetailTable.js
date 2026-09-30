@@ -53,11 +53,12 @@ export default function DetailTable({ columns, rows = [], rowKey, defaultSort, l
                   scope="col"
                   className={`cc-sortable${c.text ? ' cc-text' : ''}`}
                   aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
-                  title={c.title || `Sort by ${c.label}`}
-                  onClick={() => onSort(c.key)}
                 >
-                  {c.label}
-                  <span className="cc-sort" aria-hidden="true">{active ? (sort.dir === 'asc' ? '▲' : '▼') : '▽'}</span>
+                  {/* A real button so the sort is keyboard operable (Enter / Space). */}
+                  <button type="button" className="cc-sort-btn" title={c.title || `Sort by ${c.label}`} onClick={() => onSort(c.key)}>
+                    {c.label}
+                    <span className="cc-sort" aria-hidden="true">{active ? (sort.dir === 'asc' ? '▲' : '▼') : '▽'}</span>
+                  </button>
                 </th>
               );
             })}
@@ -73,6 +74,8 @@ export default function DetailTable({ columns, rows = [], rowKey, defaultSort, l
                 else if (c.text) content = v == null || v === '' ? DASH : String(v);
                 else content = formatValue(v, c.unit || 'number');
                 const cls = [i === 0 ? 'cc-name' : '', c.text ? 'cc-text' : 'cc-num'].filter(Boolean).join(' ');
+                // The first column names the row, so it is the row header.
+                if (i === 0) return <th key={c.key} scope="row" className={cls}>{content}</th>;
                 return <td key={c.key} className={cls}>{content}</td>;
               })}
             </tr>

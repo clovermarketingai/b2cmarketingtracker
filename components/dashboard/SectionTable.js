@@ -32,9 +32,10 @@ export default function SectionTable({ section, weeks = [], ranges, series, sele
                 <span className="cc-hint">{w.future ? 'upcoming' : w.partial ? 'partial' : formatRange(w)}</span>
               </th>
             ))}
-            <th scope="col" title={`${ranges?.mtd?.from || ''} to ${ranges?.mtd?.to || ''}`}>MTD actual</th>
+            {/* The standalone MTD column only when MTD is not already the selected range. */}
+            {selected !== 'mtd' ? <th scope="col" title={`${ranges?.mtd?.from || ''} to ${ranges?.mtd?.to || ''}`}>MTD actual</th> : null}
             <th scope="col" className="cc-sel" title={sel ? `${sel.from} to ${sel.to}` : undefined}>
-              {sel ? sel.label : 'Selected'}<span className="cc-hint">selected range</span>
+              {sel ? sel.label : 'Selected'}<span className="cc-hint">{selected === 'mtd' ? 'MTD actual · selected range' : 'selected range'}</span>
             </th>
             <th scope="col" className="cc-sel" title={`Change vs the previous ${sel?.label || 'period'}`}>vs prev</th>
             <th scope="col">Monthly target</th>
@@ -49,7 +50,7 @@ export default function SectionTable({ section, weeks = [], ranges, series, sele
               {weeks.map(w => (
                 <ValueCell key={w.id} row={row} rangeId={w.id} blank={!!w.future} title={w.partial ? `Partial week: ${w.from} to ${w.to} so far` : undefined} />
               ))}
-              <ValueCell row={row} rangeId="mtd" />
+              {selected !== 'mtd' ? <ValueCell row={row} rangeId="mtd" /> : null}
               <ValueCell row={row} rangeId={selected} selected />
               <DeltaCell row={row} rangeId={selected} />
               <TargetCell row={row} />
