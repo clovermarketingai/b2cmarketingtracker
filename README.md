@@ -61,3 +61,7 @@ pages/api/setup.js, ceo.js create the dashboard tables; CEO unlock
 4. Sign in, run `POST /api/setup` once to create the *Dashboard Costs*, *Dashboard Targets* and *Dashboard Snapshots* tables, then add your monthly costs and targets in Airtable.
 
 Pushes to the production branch redeploy automatically.
+
+## Audit
+
+`docs/AUDIT.md` is the metric audit of the three Clover apps (this tracker, the HQ Command Center and the Closing tracker): every finding, whether it was confirmed, and what was fixed on this branch.
