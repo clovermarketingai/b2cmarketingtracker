@@ -62,10 +62,10 @@ Client lead-gen campaigns and the Airtable leads they produced. Billed = Lead Co
 | `leads_unbilled` | Unbilled / blank leads | count | Lower | Yes | Home Service leads (Airtable) | count of leads with Lead Cost = Unbilled or blank (excluding PROS) |
 | `replacement_rate` | Replacement rate | percent | Lower | No | Home Service leads (Airtable) | replacement leads ÷ (billed + replacement leads) |
 | `fb_leads` | Facebook-reported leads | count | Context only | Yes | Facebook ads (Windsor.ai) | Σ actions_lead of hs_b2c campaigns (Meta's count; reconciliation only) |
-| `clicks` | Clicks | count | Context only | Yes | Facebook ads (Windsor.ai) | Σ clicks of hs_b2c campaigns |
+| `clicks` | Clicks (all) | count | Context only | Yes | Facebook ads (Windsor.ai) | Σ clicks of hs_b2c campaigns (Meta "Clicks (all)" unless WINDSOR_CLICK_FIELD is set to a link-click field) |
 | `impressions` | Impressions | count | Context only | Yes | Facebook ads (Windsor.ai) | Σ impressions of hs_b2c campaigns |
-| `ctr` | CTR | percent | Higher | No | Facebook ads (Windsor.ai) | clicks ÷ impressions |
-| `cpc` | CPC | currency | Lower | No | Facebook ads (Windsor.ai) | spend ÷ clicks |
+| `ctr` | CTR (all clicks) | percent | Higher | No | Facebook ads (Windsor.ai) | clicks (all) ÷ impressions |
+| `cpc` | CPC (all clicks) | currency | Lower | No | Facebook ads (Windsor.ai) | spend ÷ clicks (all) |
 | `cpm` | CPM | currency | Lower | No | Facebook ads (Windsor.ai) | spend ÷ impressions × 1000 |
 | `cvr` | Click to billed lead | percent | Higher | No | Home Service leads (Airtable), Facebook ads (Windsor.ai) | billed leads ÷ clicks |
 
@@ -124,8 +124,8 @@ Tax B2B campaigns from the ad account, joined to the B2B CRM when it is connecte
 | `tax_spend` | **Ad spend** | currency | Lower | Yes | Facebook ads (Windsor.ai) | Σ spend of tax_b2b campaigns |
 | `tax_fb_leads` | Facebook-reported leads | count | Higher | Yes | Facebook ads (Windsor.ai) | Σ actions_lead of tax_b2b campaigns |
 | `tax_cpl_fb` | Cost per FB lead | currency | Lower | No | Facebook ads (Windsor.ai) | tax spend ÷ FB leads |
-| `tax_ctr` | CTR | percent | Higher | No | Facebook ads (Windsor.ai) | clicks ÷ impressions |
-| `tax_cpc` | CPC | currency | Lower | No | Facebook ads (Windsor.ai) | spend ÷ clicks |
+| `tax_ctr` | CTR (all clicks) | percent | Higher | No | Facebook ads (Windsor.ai) | clicks (all) ÷ impressions |
+| `tax_cpc` | CPC (all clicks) | currency | Lower | No | Facebook ads (Windsor.ai) | spend ÷ clicks (all) |
 | `tax_cpm` | CPM | currency | Lower | No | Facebook ads (Windsor.ai) | spend ÷ impressions × 1000 |
 | `b2b_leads` | **CRM leads** | count | Higher | Yes | B2B Tax CRM (Airtable) | Prospects with Date Added in range |
 | `b2b_cpl` | Cost per CRM lead | currency | Lower | No | Facebook ads (Windsor.ai), B2B Tax CRM (Airtable) | tax spend ÷ CRM leads |

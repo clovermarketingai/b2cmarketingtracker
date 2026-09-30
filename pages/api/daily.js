@@ -53,7 +53,7 @@ export default async function handler(req, res) {
 
   if (req.query.demo === '1') {
     const { datasets, span } = demoDatasets(today);
-    const built = buildDaily({ ads: datasets.ads, hsLeads: datasets.hsLeads, retainers: datasets.retainers });
+    const built = buildDaily({ ads: datasets.ads, hsLeads: datasets.hsLeads, retainers: datasets.retainers, today });
     const demoSource = (label, n) => ({ status: 'demo', label, count: n, fetchedAt: new Date().toISOString(), ms: 0, stale: false, error: null, hint: null });
     return res.status(200).json({
       tz, today, from: span.from, mode: 'demo',
@@ -70,7 +70,7 @@ export default async function handler(req, res) {
   ]);
 
   const retainers = retainersFromConfig();
-  const built = buildDaily({ ads: ads.value, hsLeads: leads.value, retainers });
+  const built = buildDaily({ ads: ads.value, hsLeads: leads.value, retainers, today });
   const warnings = [...built.warnings];
   for (const s of [ads, leads]) {
     if (s.status === 'error') warnings.push(`${s.label}: ${s.error}`);

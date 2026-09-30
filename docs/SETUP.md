@@ -45,6 +45,7 @@ Set these in Vercel (Project → Settings → Environment Variables) for Product
 |---|---|---|---|
 | `WINDSOR_API_KEY` | yes | Pulls daily spend, clicks, impressions and `actions_lead` per campaign from `connectors.windsor.ai/facebook`. | Windsor.ai → your account → API key. |
 | `WINDSOR_ACCOUNTS` | optional | Comma list passed as `select_accounts` to restrict the pull to specific ad accounts. Blank = every account the key can see. | Windsor.ai account/connector page. |
+| `WINDSOR_CLICK_FIELD` | optional | Which Windsor field feeds the *Clicks* column. Default `clicks` = Meta *Clicks (all)*, which includes reactions and profile clicks; set `inline_link_clicks` (if your Windsor field list has it) to report link clicks like Ads Manager and the HQ app. CTR, CPC and click-to-lead follow. | Windsor.ai field reference for Facebook. |
 | `ADS_EXCLUDE_CAMPAIGN_IDS` | optional | Comma list of Facebook campaign ids to leave out of every line and total (the same list as `META_EXCLUDE_CAMPAIGN_IDS` on the HQ app: campaigns on the shared ad account that are not Clover's). Excluded spend is reported in the Data sources panel. | Copy from the HQ Vercel project. |
 | `ADS_LINE_RULES` | optional | JSON array of `{ "match": "<regex>", "line": "hs_b2c\|hs_b2b\|tax_b2b\|other" }` evaluated before the default naming rules. See [Campaign classification](#4-campaign-classification-lines). | You write it. |
 

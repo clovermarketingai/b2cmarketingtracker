@@ -381,3 +381,20 @@ test('ADS_EXCLUDE_CAMPAIGN_IDS drops those campaigns and reports the spend', asy
   assert.equal(out.rows[0].campaignId, '111');
   assert.ok(out.meta.warnings.some(w => w.includes('ADS_EXCLUDE_CAMPAIGN_IDS') && w.includes('$99.00')));
 });
+
+test('WINDSOR_CLICK_FIELD swaps the click field in the request and the normaliser', async () => {
+  const { buildUrl, normaliseRows, clickField } = await import('../lib/dashboard/sources/windsor.js');
+  const prev = process.env.WINDSOR_CLICK_FIELD;
+  process.env.WINDSOR_CLICK_FIELD = 'inline_link_clicks';
+  try {
+    assert.equal(clickField(), 'inline_link_clicks');
+    const url = new URL(buildUrl({ apiKey: 'k', from: '2026-09-01', to: '2026-09-02' }));
+    assert.ok(url.searchParams.get('fields').includes('inline_link_clicks'));
+    assert.ok(!url.searchParams.get('fields').split(',').includes('clicks'));
+    const out = normaliseRows({ data: [{ date: '2026-09-01', campaign: '(Ed) Protree Services LLC - A', campaign_id: '1', spend: 1, inline_link_clicks: 7, clicks: 99, impressions: 10, actions_lead: 0 }] });
+    assert.equal(out.rows[0].clicks, 7);
+  } finally {
+    if (prev === undefined) delete process.env.WINDSOR_CLICK_FIELD; else process.env.WINDSOR_CLICK_FIELD = prev;
+  }
+  assert.equal(clickField('bad field!'), 'clicks');
+});

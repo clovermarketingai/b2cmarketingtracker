@@ -60,3 +60,17 @@ test('client filter keeps only that client', () => {
   assert.equal(d.rows.length, 1);
   assert.equal(d.rows[0].name, 'Nico PROS');
 });
+
+test('retainer accrues on every calendar day from first activity through today, even with no ads or leads', () => {
+  const ads2 = { rows: [
+    { date: '2026-09-27', campaign: '(Nico) PROS Tree & Landscape - X', campaignId: 'c', line: 'hs_b2c', client: '(Nico) PROS Tree & Landscape', spend: 30, clicks: 10, impressions: 1000, fbLeads: 2 },
+  ] };
+  const d = buildDaily({ ads: ads2, hsLeads: { rows: [] }, retainers, clients, today: '2026-09-30' });
+  const nico = d.rows.filter(r => r.name === 'Nico PROS');
+  assert.deepEqual(nico.map(r => r.date), ['2026-09-30', '2026-09-29', '2026-09-28', '2026-09-27']);
+  assert.equal(nico.every(r => r.retainer === 100 && r.revenue === 100), true);
+  assert.equal(nico[0].spend, 0);
+  assert.equal(d.totals.revenue, 400);
+  const d2 = buildDaily({ ads: ads2, hsLeads: { rows: [] }, retainers: [{ ...retainers[0], from: '2026-09-25', to: '2026-09-26' }], clients, today: '2026-09-30' });
+  assert.deepEqual(d2.rows.filter(r => r.name === 'Nico PROS' && r.retainer > 0).map(r => r.date), ['2026-09-26', '2026-09-25']);
+});
