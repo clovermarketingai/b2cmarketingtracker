@@ -1,377 +1,216 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import Head from 'next/head';
+import { CSS } from '../components/dashboard/styles.js';
+import StatusPill, { sourceTone } from '../components/dashboard/StatusPill.js';
+import { formatValue, formatTimestamp, formatDay, DASH } from '../lib/dashboard/format.js';
 
-// Client roster, short names, Airtable names and revenue rules come from
-// /api/config (see lib/clients.js). They are fetched after sign-in instead of
-// being compiled into this public page chunk.
+// All-time daily breakdown, one row per (date, client). Everything is computed
+// server-side by /api/daily (lib/dashboard/daily.js); this page only renders,
+// filters and exports.
 
-// Revenue for one day of rows for a client, from its rule descriptor.
-function revenueFor(client, { leads, days = 1 }) {
-  if (!client || client.paused || !client.rule) return 0;
-  const rule = client.rule;
-  if (rule.type === 'perLead') return leads * rule.rate;
-  if (rule.type === 'weekly') return (days / 7) * rule.perWeek;
-  if (rule.type === 'tiered') {
-    const lifetimeTotal = client.lifetimeTotal != null ? client.lifetimeTotal : leads;
-    const lifetimeBefore = lifetimeTotal - leads;
-    const tier1Remaining = Math.max(0, rule.tier1Leads - lifetimeBefore);
-    const tier1Leads = Math.min(leads, tier1Remaining);
-    const tier2Leads = leads - tier1Leads;
-    return tier1Leads * rule.tier1Rate + tier2Leads * rule.tier2Rate;
-  }
-  return 0;
+const COLUMNS = [
+  { key: 'spend', label: 'Spend', unit: 'currency' },
+  { key: 'leads', label: 'Leads', unit: 'number', title: 'Every lead created that day (local date)' },
+  { key: 'billed', label: 'Billed', unit: 'number', title: 'Leads whose Lead Cost is a price; every lead for retainer clients' },
+  { key: 'free', label: 'Free', unit: 'number' },
+  { key: 'replacement', label: 'Repl.', unit: 'number', title: 'Replacement leads' },
+  { key: 'unbilled', label: 'Unbilled', unit: 'number', title: 'Unbilled, blank or unrecognised Lead Cost' },
+  { key: 'cpl', label: 'CPL', unit: 'currency', title: 'Spend ÷ billed leads' },
+  { key: 'revenue', label: 'Revenue', unit: 'currency', title: 'Σ Lead Cost of billed leads + retainer ÷ 7' },
+  { key: 'profit', label: 'Profit', unit: 'currency', signed: true },
+  { key: 'margin', label: 'Margin', unit: 'percent', signed: true },
+  { key: 'fbLeads', label: 'FB leads', unit: 'number', title: 'Facebook-reported leads (reconciliation only)' },
+  { key: 'clicks', label: 'Clicks', unit: 'number' },
+  { key: 'cpc', label: 'CPC', unit: 'currency' },
+  { key: 'ctr', label: 'CTR', unit: 'percent' },
+  { key: 'cpm', label: 'CPM', unit: 'currency' },
+  { key: 'cvr', label: 'CVR', unit: 'percent', title: 'Billed leads ÷ clicks' },
+  { key: 'impressions', label: 'Impr.', unit: 'number' },
+];
+
+const CSV_COLUMNS = ['date', 'client', 'campaigns', 'spend', 'leads', 'billed', 'free', 'replacement', 'prepay', 'unbilled', 'cpl', 'revenue', 'leadRevenue', 'retainer', 'profit', 'margin', 'fbLeads', 'clicks', 'cpc', 'ctr', 'cpm', 'cvr', 'impressions'];
+
+function csvCell(v) {
+  if (v == null) return '';
+  const s = typeof v === 'number' ? (Number.isInteger(v) ? String(v) : v.toFixed(2)) : String(v);
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-const isClientCampaign = (c) => c.startsWith('(');
-const clientFromCampaign = (c) => isClientCampaign(c) ? c.replace(/\s*-\s*Tree Service.*$/, '') : c;
-
-const fmt$ = (n) => '$' + (n ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const fmtSigned$ = (n) => (n >= 0 ? '+' : '−') + '$' + Math.abs(n).toFixed(2);
-const fmtPct = (n) => (n >= 0 ? '+' : '') + n.toFixed(1) + '%';
-const fmtNum = (n) => (n ?? 0).toLocaleString();
-
-const selectBase = {
-  width: '100%', appearance: 'none', background: 'white',
-  border: '1px solid #e8e3da', borderRadius: 11,
-  padding: '10px 34px 10px 13px', fontSize: 13.5,
-  color: '#1f1b16', fontFamily: 'inherit',
-  cursor: 'pointer', outline: 'none',
-};
-
-const ChevronIcon = () => (
-  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8a7d6b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}>
-    <polyline points="6 9 12 15 18 9" />
-  </svg>
-);
-
-const Select = ({ value, onChange, options }) => (
-  <div style={{ position: 'relative' }}>
-    <select value={value} onChange={(e) => onChange(e.target.value)} style={selectBase}>
-      {options.map(o => <option key={o} value={o}>{o}</option>)}
-    </select>
-    <ChevronIcon />
-  </div>
-);
+function Cell({ row, col }) {
+  const v = row[col.key];
+  const text = formatValue(v, col.unit);
+  let cls = 'cc-num';
+  if (col.signed && typeof v === 'number') cls += v >= 0 ? ' cc-delta good' : ' cc-delta bad';
+  if (col.key === 'leads' && v === 0 && row.spend > 0) cls += ' cc-delta bad';
+  return <td className={cls} title={col.title}>{col.signed && typeof v === 'number' && v > 0 ? `+${text}` : text}</td>;
+}
 
 export default function DailyBreakdown() {
-  const [rows, setRows] = useState([]);
-  const [leadsByKey, setLeadsByKey] = useState({});
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [fetchedAt, setFetchedAt] = useState(null);
-  const [leadsStats, setLeadsStats] = useState(null);
-  const [campaignFilter, setCampaignFilter] = useState('All campaigns');
-  const [clients, setClients] = useState({});
+  const [refreshing, setRefreshing] = useState(false);
+  const [client, setClient] = useState('all');
 
-  const shortName = (full) => (clients[full] && clients[full].short) || full;
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-
-    Promise.all([
-      fetch('/api/windsor').then(r => r.json()),
-      fetch('/api/leads').then(r => r.json()),
-      fetch('/api/config').then(r => r.json()),
-    ])
-      .then(([windsorData, leadsData, configData]) => {
-        if (cancelled) return;
-        if (configData.error) {
-          setError('Config: ' + configData.error);
-          setLoading(false);
-          return;
-        }
-        if (windsorData.error) {
-          setError('Windsor: ' + windsorData.error);
-          setLoading(false);
-          return;
-        }
-        if (leadsData.error) {
-          setError('Airtable leads: ' + leadsData.error);
-          setLoading(false);
-          return;
-        }
-        setClients(configData.clients || {});
-        setRows(windsorData.rows || []);
-        setLeadsByKey(leadsData.leadsByKey || {});
-        setLeadsStats(leadsData.stats || null);
-        setFetchedAt(windsorData.fetched_at);
-        setLoading(false);
-      })
-      .catch(err => {
-        if (cancelled) return;
-        setError(String(err));
-        setLoading(false);
-      });
-    return () => { cancelled = true; };
+  const load = useCallback(async ({ refresh = false } = {}) => {
+    if (refresh) setRefreshing(true); else setLoading(true);
+    setError('');
+    try {
+      const params = new URLSearchParams();
+      if (new URLSearchParams(window.location.search).get('demo') === '1') params.set('demo', '1');
+      if (refresh) params.set('refresh', '1');
+      const q = params.toString();
+      const r = await fetch(`/api/daily${q ? `?${q}` : ''}`, { credentials: 'same-origin', cache: 'no-store' });
+      if (r.status === 401) {
+        window.location.href = `/login?next=${encodeURIComponent('/daily')}`;
+        return;
+      }
+      let json = null;
+      try { json = await r.json(); } catch { json = null; }
+      if (!r.ok || !json || json.error) setError((json && (json.message || json.error)) || `Could not load (${r.status}).`);
+      else setData(json);
+    } catch {
+      setError('Network error while loading the daily breakdown.');
+    }
+    setLoading(false);
+    setRefreshing(false);
   }, []);
 
-  const earliestDate = useMemo(() => {
-    if (rows.length === 0) return null;
-    return rows.reduce((m, r) => r.date < m ? r.date : m, rows[0].date);
-  }, [rows]);
-  const latestDate = useMemo(() => {
-    if (rows.length === 0) return null;
-    return rows.reduce((m, r) => r.date > m ? r.date : m, rows[0].date);
-  }, [rows]);
+  useEffect(() => { load(); }, [load]);
 
-  // Get billed-lead count from Airtable for a given (windsorClient, date)
-  const billedLeadsFor = (windsorClient, date) => {
-    const airtableName = clients[windsorClient] && clients[windsorClient].airtable;
-    if (!airtableName) return 0;
-    return leadsByKey[`${airtableName}|${date}`] || 0;
-  };
-
-  const filteredRows = useMemo(() => {
-    const filtered = rows.filter(r => {
-      if (campaignFilter === 'All campaigns') return true;
-      return clientFromCampaign(r.campaign) === campaignFilter;
-    });
-    const spendByCampaign = {};
-    for (const r of filtered) {
-      spendByCampaign[r.campaign] = (spendByCampaign[r.campaign] || 0) + r.spend;
-    }
-    return filtered.filter(r => spendByCampaign[r.campaign] > 0);
-  }, [rows, campaignFilter]);
-
-  const allClients = useMemo(() => {
-    const spendByClient = {};
-    for (const r of rows) {
-      if (!isClientCampaign(r.campaign)) continue;
-      const c = clientFromCampaign(r.campaign);
-      spendByClient[c] = (spendByClient[c] || 0) + r.spend;
-    }
-    const active = Object.keys(spendByClient).filter(c => spendByClient[c] > 0).sort();
-    return ['All campaigns', ...active];
-  }, [rows]);
-
-  const dailyRows = useMemo(() => {
-    const out = filteredRows.map(r => {
-      const client = clientFromCampaign(r.campaign);
-      // Override Windsor's lead count with Airtable's billed lead count
-      const leads = billedLeadsFor(client, r.date);
-      const revenue = revenueFor(clients[client], { leads, days: 1 });
-      const profit = revenue - r.spend;
-      const margin = revenue > 0 ? (profit / revenue) * 100 : (r.spend > 0 ? -100 : 0);
-      return {
-        date: r.date,
-        client,
-        spend: r.spend,
-        leads,
-        cpl: leads > 0 ? r.spend / leads : null,
-        revenue,
-        profit,
-        margin,
-        clicks: r.clicks,
-        cpc: r.clicks > 0 ? r.spend / r.clicks : 0,
-        ctr: r.impressions > 0 ? (r.clicks / r.impressions) * 100 : 0,
-        cpm: r.impressions > 0 ? (r.spend / r.impressions) * 1000 : 0,
-        cvr: r.clicks > 0 ? (leads / r.clicks) * 100 : 0,
-        impressions: r.impressions,
-      };
-    });
-    return out.sort((a, b) => {
-      if (a.date !== b.date) return b.date.localeCompare(a.date);
-      return a.client.localeCompare(b.client);
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filteredRows, leadsByKey, clients]);
+  const rows = useMemo(() => {
+    if (!data) return [];
+    return client === 'all' ? data.rows : data.rows.filter(r => r.client === client);
+  }, [data, client]);
 
   const totals = useMemo(() => {
-    const t = dailyRows.reduce((acc, r) => ({
-      spend: acc.spend + r.spend, leads: acc.leads + r.leads, revenue: acc.revenue + r.revenue,
-      clicks: acc.clicks + r.clicks, impressions: acc.impressions + r.impressions,
-    }), { spend:0, leads:0, revenue:0, clicks:0, impressions:0 });
+    if (!data) return null;
+    if (client === 'all') return data.totals;
+    const t = rows.reduce((acc, r) => {
+      for (const k of ['spend', 'clicks', 'impressions', 'fbLeads', 'leads', 'billed', 'free', 'replacement', 'prepay', 'unbilled', 'revenue']) acc[k] += r[k] || 0;
+      return acc;
+    }, { spend: 0, clicks: 0, impressions: 0, fbLeads: 0, leads: 0, billed: 0, free: 0, replacement: 0, prepay: 0, unbilled: 0, revenue: 0 });
+    const d = (a, b) => (b ? a / b : null);
     return {
       ...t,
-      cpl: t.leads > 0 ? t.spend / t.leads : null,
-      profit: t.revenue - t.spend,
-      margin: t.revenue > 0 ? ((t.revenue - t.spend) / t.revenue) * 100 : 0,
-      cpc: t.clicks > 0 ? t.spend / t.clicks : 0,
-      ctr: t.impressions > 0 ? (t.clicks / t.impressions) * 100 : 0,
-      cpm: t.impressions > 0 ? (t.spend / t.impressions) * 1000 : 0,
-      cvr: t.clicks > 0 ? (t.leads / t.clicks) * 100 : 0,
+      cpl: d(t.spend, t.billed), profit: t.revenue - t.spend, margin: t.revenue ? ((t.revenue - t.spend) / t.revenue) * 100 : null,
+      cpc: d(t.spend, t.clicks), ctr: t.impressions ? (t.clicks / t.impressions) * 100 : null,
+      cpm: t.impressions ? (t.spend / t.impressions) * 1000 : null, cvr: t.clicks ? (t.billed / t.clicks) * 100 : null,
+      days: new Set(rows.map(r => r.date)).size, clients: new Set(rows.map(r => r.client)).size,
     };
-  }, [dailyRows]);
+  }, [data, rows, client]);
 
-  const uniqueDays = useMemo(() => new Set(dailyRows.map(r => r.date)).size, [dailyRows]);
-  const uniqueClients = useMemo(() => new Set(dailyRows.map(r => r.client)).size, [dailyRows]);
+  const earliest = rows.length ? rows[rows.length - 1].date : null;
+  const latest = rows.length ? rows[0].date : null;
 
   const downloadCSV = () => {
-    const headers = ['date','client','spend','leads','cpl','revenue','profit','margin_pct','clicks','cpc','ctr_pct','cpm','cvr_pct','impressions'];
-    const rowsOut = dailyRows.map(r => [
-      r.date,
-      shortName('(' + r.client.slice(1)),
-      r.spend.toFixed(2),
-      r.leads,
-      r.cpl != null ? r.cpl.toFixed(2) : '',
-      r.revenue.toFixed(2),
-      r.profit.toFixed(2),
-      r.margin.toFixed(1),
-      r.clicks,
-      r.cpc.toFixed(2),
-      r.ctr.toFixed(2),
-      r.cpm.toFixed(2),
-      r.cvr.toFixed(2),
-      r.impressions,
-    ]);
-    const csv = [headers.join(','), ...rowsOut.map(r => r.join(','))].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
+    const lines = [CSV_COLUMNS.join(',')];
+    for (const r of rows) lines.push(CSV_COLUMNS.map(k => csvCell(k === 'client' ? r.name : r[k])).join(','));
+    const blob = new Blob([lines.join('\r\n')], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = `clover-daily-all-time.csv`;
+    a.href = url; a.download = `clover-daily-${client === 'all' ? 'all-clients' : client.replace(/[^a-z0-9]+/gi, '-')}.csv`;
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
   };
 
-  // Footer rate-card summary, built from /api/config rather than hard-coded.
-  const pricingLabel = useMemo(() => Object.values(clients)
-    .filter(c => c && c.rule && !c.paused && c.rule.type !== 'none')
-    .map(c => {
-      const r = c.rule;
-      if (r.type === 'perLead') return `${c.short} $${r.rate}`;
-      if (r.type === 'weekly') return `${c.short} $${r.perWeek % 1000 === 0 ? (r.perWeek / 1000) + 'k' : r.perWeek}/week`;
-      if (r.type === 'tiered') return `${c.short} tiered`;
-      return null;
-    })
-    .filter(Boolean)
-    .join(', '), [clients]);
-
-  const lastSyncLabel = fetchedAt
-    ? new Date(fetchedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
-    : '—';
-
   return (
-    <div style={{
-      minHeight: '100vh',
-      background: '#f4f1ec',
-      fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, sans-serif',
-      color: '#1f1b16',
-      padding: '36px 28px 64px',
-      WebkitFontSmoothing: 'antialiased',
-    }}>
-      <div style={{ maxWidth: 1400, margin: '0 auto' }}>
-
-        <header style={{ marginBottom: 22 }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.12em', color: '#8a7d6b', textTransform: 'uppercase', marginBottom: 6 }}>
-                Clover · B2C Performance
-              </div>
-              <h1 style={{ margin: 0, fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em' }}>Daily breakdown · all time</h1>
-              <div style={{ fontSize: 12, color: '#8a7d6b', marginTop: 4 }}>
-                {earliestDate && latestDate ? `${earliestDate} → ${latestDate} · ${uniqueDays} day${uniqueDays !== 1 ? 's' : ''} · ${uniqueClients} active client${uniqueClients !== 1 ? 's' : ''} · ${dailyRows.length} rows` : '—'}
-                {leadsStats && ` · ${leadsStats.billedLeads}/${leadsStats.totalLeads} leads billed`}
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <a href="/" style={{ fontSize: 12, padding: '7px 12px', background: 'transparent', color: '#1f1b16', border: '0.5px solid #d3cfc5', borderRadius: 8, textDecoration: 'none' }}>Tracker</a>
-              <button style={{ fontSize: 12, padding: '7px 12px', background: '#1f1b16', color: '#f4f1ec', border: 'none', borderRadius: 8, cursor: 'pointer' }}>Daily</button>
-              <button onClick={downloadCSV} style={{ fontSize: 12, padding: '7px 12px', background: 'transparent', color: '#1f1b16', border: '0.5px solid #d3cfc5', borderRadius: 8, cursor: 'pointer' }}>Download CSV</button>
+    <div className="cc">
+      <Head><title>Clover · Daily breakdown</title></Head>
+      <style dangerouslySetInnerHTML={{ __html: CSS }} />
+      <div className="cc-top">
+        <div className="cc-top-in">
+          <div>
+            <div className="cc-title">Daily breakdown</div>
+            <div className="cc-sub">
+              {data ? `${data.from} → ${data.today} · ${data.tz}` : 'Home Service · all time'}
+              {totals ? ` · ${totals.days} day${totals.days === 1 ? '' : 's'} · ${totals.clients} client${totals.clients === 1 ? '' : 's'} · ${rows.length} rows` : ''}
             </div>
           </div>
-          <div style={{ fontSize: 11.5, color: '#8a7d6b', marginTop: 8 }}>
-            {loading ? 'Loading…' : `Fetched: ${lastSyncLabel}`}
+          <div className="cc-top-right">
+            <nav className="cc-nav" aria-label="Pages">
+              <a href="/">Command Center</a>
+              <a href="/daily" className="on">Daily breakdown</a>
+              <a href="/#sources">Data sources</a>
+            </nav>
+            <span className="cc-asof">{loading ? 'Loading…' : data ? <>Data as of <b>{formatTimestamp(data.fetched_at, data.tz)}</b></> : null}</span>
+            <button type="button" className="cc-btn" onClick={() => load({ refresh: true })} disabled={loading || refreshing}>{refreshing ? 'Refreshing…' : 'Refresh'}</button>
+            <button type="button" className="cc-btn cc-btn-primary" onClick={downloadCSV} disabled={!rows.length}>Download CSV</button>
           </div>
-        </header>
+        </div>
+      </div>
 
-        {error && (
-          <div style={{ padding: 16, marginBottom: 18, background: '#f6e6e2', border: '1px solid #e8c8be', borderRadius: 14 }}>
-            <div style={{ fontSize: 13, color: '#9a3924', fontWeight: 500 }}>Couldn't load data</div>
-            <div style={{ fontSize: 12, color: '#5e5345', marginTop: 4 }}>{error}</div>
+      <div className="cc-wrap">
+        {error ? <div className="cc-banner err" role="alert">{error}</div> : null}
+        {data && data.warnings && data.warnings.length ? (
+          <div className="cc-banner warn">
+            <b>Data notes</b>
+            <ul>{data.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
           </div>
-        )}
+        ) : null}
 
-        <div style={{ background: 'white', border: '1px solid #e8e3da', borderRadius: 14, padding: 12, marginBottom: 14 }}>
-          <Select value={campaignFilter} onChange={setCampaignFilter} options={allClients} />
+        <div className="cc-chips" role="group" aria-label="Client filter">
+          <span className="cc-chips-label">Client</span>
+          <button type="button" className="cc-chip" aria-pressed={client === 'all'} onClick={() => setClient('all')}>All clients</button>
+          {(data ? data.clientOptions : []).map(c => (
+            <button key={c.key} type="button" className="cc-chip" aria-pressed={client === c.key} onClick={() => setClient(c.key)} title={c.unmapped ? 'Not in lib/clients.js' : undefined}>
+              {c.name}{c.unmapped ? ' ?' : ''}
+            </button>
+          ))}
+          {data ? (
+            <span className="cc-chip-dates">
+              {Object.entries(data.sources).map(([k, s]) => (
+                <span key={k} style={{ marginLeft: 8 }}><StatusPill tone={sourceTone(s.status)} label={`${s.label}: ${s.status}`} title={s.error || s.hint || undefined} /></span>
+              ))}
+            </span>
+          ) : null}
         </div>
 
-        <div style={{ background: 'white', border: '1px solid #e8e3da', borderRadius: 14, overflow: 'hidden' }}>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
+        <section className="cc-block" aria-labelledby="daily-h">
+          <header className="cc-head">
+            <h2 id="daily-h">Home Service — daily P&amp;L by client</h2>
+            <p>One row per client per day. Spend is summed across the client&apos;s campaigns; leads are counted once, on their local date. Revenue is the Lead Cost of billed leads plus retainers ÷ 7.</p>
+          </header>
+          <div className="cc-scroll">
+            <table className="cc-tbl">
               <thead>
-                <tr style={{ background: '#faf7f1' }}>
-                  <Th>Date</Th>
-                  <Th>Client</Th>
-                  <Th align="right">Spend</Th>
-                  <Th align="right">Leads</Th>
-                  <Th align="right">CPL</Th>
-                  <Th align="right">Revenue</Th>
-                  <Th align="right">Profit</Th>
-                  <Th align="right">Margin</Th>
-                  <Th align="right">Clicks</Th>
-                  <Th align="right">CPC</Th>
-                  <Th align="right">CTR</Th>
-                  <Th align="right">CPM</Th>
-                  <Th align="right">CVR</Th>
-                  <Th align="right">Impressions</Th>
+                <tr>
+                  <th scope="col">Date · client</th>
+                  {COLUMNS.map(c => <th key={c.key} scope="col" title={c.title}>{c.label}</th>)}
                 </tr>
               </thead>
               <tbody>
-                {loading && (<tr><td colSpan={14} style={{ padding: 28, textAlign: 'center', color: '#8a7d6b' }}>Loading…</td></tr>)}
-                {!loading && dailyRows.length === 0 && (<tr><td colSpan={14} style={{ padding: 28, textAlign: 'center', color: '#8a7d6b' }}>No rows match the current filter.</td></tr>)}
-                {dailyRows.map((r, i) => {
-                  const prev = dailyRows[i - 1];
-                  const dateBreak = prev && prev.date !== r.date;
+                {loading ? <tr><td colSpan={COLUMNS.length + 1} className="cc-empty">Loading…</td></tr> : null}
+                {!loading && rows.length === 0 ? <tr><td colSpan={COLUMNS.length + 1} className="cc-empty">No rows.</td></tr> : null}
+                {rows.map((r, i) => {
+                  const dateBreak = i > 0 && rows[i - 1].date !== r.date;
                   return (
-                    <tr key={`${r.date}-${r.client}`} style={{ borderTop: dateBreak ? '1px solid #e8e3da' : (i === 0 ? 'none' : '0.5px solid #f4efe7') }}>
-                      <Td style={{ fontWeight: 500, whiteSpace: 'nowrap' }}>{r.date}</Td>
-                      <Td style={{ whiteSpace: 'nowrap' }}>{shortName('(' + r.client.slice(1))}</Td>
-                      <Td align="right">{fmt$(r.spend)}</Td>
-                      <Td align="right" style={{ color: r.leads === 0 ? '#b94a3b' : '#1f1b16' }}>{r.leads}</Td>
-                      <Td align="right">{r.cpl != null ? fmt$(r.cpl) : '—'}</Td>
-                      <Td align="right">{fmt$(r.revenue)}</Td>
-                      <Td align="right" style={{ color: r.profit >= 0 ? '#3a6b29' : '#9a3924' }}>{fmtSigned$(r.profit)}</Td>
-                      <Td align="right" style={{ color: r.margin >= 0 ? '#3a6b29' : '#9a3924' }}>{fmtPct(r.margin)}</Td>
-                      <Td align="right">{fmtNum(r.clicks)}</Td>
-                      <Td align="right">{fmt$(r.cpc)}</Td>
-                      <Td align="right">{r.ctr.toFixed(2)}%</Td>
-                      <Td align="right">{fmt$(r.cpm)}</Td>
-                      <Td align="right">{r.cvr.toFixed(2)}%</Td>
-                      <Td align="right" style={{ color: '#8a7d6b' }}>{fmtNum(r.impressions)}</Td>
+                    <tr key={`${r.date}|${r.client}`} style={dateBreak ? { boxShadow: 'inset 0 2px 0 #d9dce2' } : undefined}>
+                      <td>
+                        <div className="cc-metric"><span className="cc-metric-label"><b>{formatDay(r.date, { weekday: true })}</b><span className="cc-metric-note">{r.name}{r.campaigns > 1 ? ` · ${r.campaigns} campaigns` : ''}{r.unmapped ? ' · not in rate card' : ''}</span></span></div>
+                      </td>
+                      {COLUMNS.map(c => <Cell key={c.key} row={r} col={c} />)}
                     </tr>
                   );
                 })}
-                {dailyRows.length > 0 && (
-                  <tr style={{ borderTop: '1.5px solid #efe9e0', background: '#faf7f1', fontWeight: 500 }}>
-                    <Td style={{ fontWeight: 500 }}>Total</Td>
-                    <Td style={{ color: '#8a7d6b' }}>{uniqueDays} day{uniqueDays !== 1 ? 's' : ''} · {uniqueClients} client{uniqueClients !== 1 ? 's' : ''}</Td>
-                    <Td align="right">{fmt$(totals.spend)}</Td>
-                    <Td align="right">{totals.leads}</Td>
-                    <Td align="right">{totals.cpl != null ? fmt$(totals.cpl) : '—'}</Td>
-                    <Td align="right">{fmt$(totals.revenue)}</Td>
-                    <Td align="right" style={{ color: totals.profit >= 0 ? '#3a6b29' : '#9a3924' }}>{fmtSigned$(totals.profit)}</Td>
-                    <Td align="right" style={{ color: totals.margin >= 0 ? '#3a6b29' : '#9a3924' }}>{fmtPct(totals.margin)}</Td>
-                    <Td align="right">{fmtNum(totals.clicks)}</Td>
-                    <Td align="right">{fmt$(totals.cpc)}</Td>
-                    <Td align="right">{totals.ctr.toFixed(2)}%</Td>
-                    <Td align="right">{fmt$(totals.cpm)}</Td>
-                    <Td align="right">{totals.cvr.toFixed(2)}%</Td>
-                    <Td align="right" style={{ color: '#8a7d6b' }}>{fmtNum(totals.impressions)}</Td>
-                  </tr>
-                )}
               </tbody>
+              {totals && rows.length ? (
+                <tfoot>
+                  <tr className="cc-primary">
+                    <td>Total · {totals.days} day{totals.days === 1 ? '' : 's'} · {totals.clients} client{totals.clients === 1 ? '' : 's'}</td>
+                    {COLUMNS.map(c => <Cell key={c.key} row={totals} col={c} />)}
+                  </tr>
+                </tfoot>
+              ) : null}
             </table>
           </div>
-        </div>
+        </section>
 
-        <div style={{ fontSize: 11, color: '#a99c87', textAlign: 'center', marginTop: 20, lineHeight: 1.7 }}>
-          All-time daily breakdown. Lead counts pulled from Airtable (billed leads only — $price, not Free/Replacement/Prepay/Unbilled). PROS counts all leads (flat retainer).<br />
-          {pricingLabel ? `Pricing: ${pricingLabel}.` : null}
-        </div>
+        <p className="cc-foot">
+          {earliest && latest ? `${formatDay(earliest)} → ${formatDay(latest)}. ` : ''}
+          Billed = Lead Cost is a price (retainer clients: every lead, revenue from the weekly retainer). Free, Replacement, Prepay, Unbilled and blank Lead Cost never bill. Dates are the business day in {data ? data.tz : 'the business timezone'}. {DASH} means not computable.
+        </p>
       </div>
     </div>
   );
 }
-
-const Th = ({ children, align = 'left' }) => (
-  <th style={{
-    textAlign: align, padding: '9px 12px',
-    fontSize: 10.5, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
-    color: '#8a7d6b', borderBottom: '1px solid #efe9e0', whiteSpace: 'nowrap',
-  }}>{children}</th>
-);
-
-const Td = ({ children, align = 'left', style = {} }) => (
-  <td style={{ padding: '8px 12px', textAlign: align, color: '#3a3128', ...style }}>{children}</td>
-);

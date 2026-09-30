@@ -6,6 +6,8 @@
 import { loadDashboard } from '../../lib/dashboard/load';
 import { ceoUnlockedFor, ceoConfigured } from '../../lib/auth';
 
+export const config = { maxDuration: 60 };
+
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
     res.setHeader('Allow', 'GET');

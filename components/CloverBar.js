@@ -3,7 +3,7 @@ import React from 'react';
 const APPS = [
   { key: 'hq', href: 'https://hq.clovermarketing.ai', label: 'Command Center' },
   { key: 'closing', href: 'https://closing.clovermarketing.ai', label: 'Closing Tracker' },
-  { key: 'b2c', href: 'https://b2c.clovermarketing.ai/', label: 'Command Center' },
+  { key: 'b2c', href: 'https://b2c.clovermarketing.ai/', label: 'Dashboard' },
 ];
 
 const CSS = `

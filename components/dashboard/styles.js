@@ -9,7 +9,7 @@ export const CSS = `
   --cc-dark:#0f172a;--cc-primary-wash:#e8f5ec;--cc-accent:#5b5bd6;
   --cc-good:#0ca30c;--cc-warning:#fab219;--cc-serious:#ec835a;--cc-critical:#d03b3b;--cc-neutral:#6b7280;
 }
-.cc{background:var(--cc-page);color:var(--cc-ink);font-family:system-ui,-apple-system,"Segoe UI",Inter,sans-serif;font-size:14px;line-height:1.45;min-height:100vh;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+.cc{background:var(--cc-page);color:var(--cc-ink);font-family:system-ui,-apple-system,"Segoe UI",Inter,sans-serif;font-size:14px;line-height:1.45;min-height:100vh;-webkit-font-smoothing:antialiased;overflow-x:clip}
 .cc *{box-sizing:border-box}
 .cc a{color:var(--cc-accent)}
 .cc button{font:inherit}
@@ -32,7 +32,7 @@ export const CSS = `
 .cc-btn:disabled{opacity:.6;cursor:default}
 .cc-btn-primary{background:var(--cc-dark);color:#fff;border-color:var(--cc-dark)}
 .cc-btn-primary:hover{border-color:var(--cc-dark);background:#1e293b}
-@media (max-width:719.98px){.cc-top{top:88px}}
+@media (max-width:719.98px){.cc-top{position:static}}
 
 /* range chips */
 .cc-chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:14px 0 4px}

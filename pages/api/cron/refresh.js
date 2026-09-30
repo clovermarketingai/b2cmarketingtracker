@@ -10,6 +10,8 @@
 import { loadDashboard } from '../../../lib/dashboard/load';
 import * as costs from '../../../lib/dashboard/sources/costs';
 
+export const config = { maxDuration: 60 };
+
 /**
  * The snapshot records for a payload: CEO rows plus every primary row,
  * de-duplicated by metric id, for 'today' and 'mtd', null values skipped.

@@ -5,6 +5,8 @@
 import { loadDashboard } from '../../../lib/dashboard/load';
 import { toCsv, CLIENT_COLUMNS } from '../../../lib/dashboard/export';
 
+export const config = { maxDuration: 60 };
+
 const FORMATS = ['json', 'csv'];
 const first = (v) => (Array.isArray(v) ? v[0] : v);
 

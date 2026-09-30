@@ -11,6 +11,8 @@ import { businessTz, todayISO, pullWindow } from '../../../lib/dashboard/dates';
 import { clampRange, parseIds, dailyRows, toCsv, DAILY_IDS, CEO_ONLY_IDS } from '../../../lib/dashboard/export';
 import { ceoUnlockedFor } from '../../../lib/auth';
 
+export const config = { maxDuration: 60 };
+
 const MAX_DAYS = 92;
 const DEFAULT_DAYS = 30;
 const FORMATS = ['json', 'csv'];

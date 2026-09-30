@@ -11,6 +11,8 @@ import { loadDashboard } from '../../../lib/dashboard/load';
 import { flattenPayload, parseSections, SECTION_IDS } from '../../../lib/dashboard/export';
 import { ceoUnlockedFor, ceoConfigured } from '../../../lib/auth';
 
+export const config = { maxDuration: 60 };
+
 const FORMATS = ['full', 'flat'];
 
 export default async function handler(req, res) {
