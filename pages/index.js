@@ -1,710 +1,260 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import Head from 'next/head';
+import { LINE_LABEL } from '../lib/dashboard/catalog.js';
+import { formatDay, formatTimestamp, formatValue, DASH } from '../lib/dashboard/format.js';
+import { CSS } from '../components/dashboard/styles.js';
+import RangeChips from '../components/dashboard/RangeChips.js';
+import CeoTable from '../components/dashboard/CeoTable.js';
+import SectionTable from '../components/dashboard/SectionTable.js';
+import DetailTable from '../components/dashboard/DetailTable.js';
+import SourcesPanel from '../components/dashboard/SourcesPanel.js';
+import UnlockCard from '../components/dashboard/UnlockCard.js';
+import Formulas from '../components/dashboard/Formulas.js';
+import StatusPill, { healthPill } from '../components/dashboard/StatusPill.js';
 
-const FALLBACK_CLOSERS = ['Tyler', 'Jeshua'];
-const DATE_PRESETS = ['Today', 'Yesterday', 'Last 7 days', 'Last 14 days', 'Last 30 days', 'Month to date', 'Custom'];
+const DEFAULT_RANGE = 'mtd';
+const RANGE_STORAGE_KEY = 'cc.range';
 
-// Prospect statuses that mean "we haven't contacted them yet"
-const UNCONTACTED_STATUSES = new Set(['Hotlist', 'Follow Up']);
-
-const pad2 = (n) => String(n).padStart(2, '0');
-const toISODate = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-const todayISO = () => toISODate(new Date());
-const fmtPct1 = (n) => n.toFixed(1) + '%';
-
-// Format seconds → "X sec", "X min", "X hr Y min"
-function fmtSpeedToLead(seconds) {
-  if (seconds == null || isNaN(seconds)) return '—';
-  const s = Math.max(0, Math.round(seconds));
-  if (s < 60) return `${s} sec`;
-  if (s < 3600) return `${Math.round(s / 60)} min`;
-  const hours = Math.floor(s / 3600);
-  const mins = Math.round((s % 3600) / 60);
-  return mins > 0 ? `${hours} hr ${mins} min` : `${hours} hr`;
+/** Build the /api/metrics URL for the current page mode. */
+function metricsUrl({ refresh = false } = {}) {
+  const params = new URLSearchParams();
+  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('demo') === '1') params.set('demo', '1');
+  if (refresh) params.set('refresh', '1');
+  const q = params.toString();
+  return `/api/metrics${q ? `?${q}` : ''}`;
 }
 
-function presetToRange(preset) {
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  if (preset === 'Today') return { start: toISODate(today), end: toISODate(today) };
-  if (preset === 'Yesterday') {
-    const y = new Date(today); y.setDate(y.getDate() - 1);
-    return { start: toISODate(y), end: toISODate(y) };
-  }
-  if (preset === 'Last 7 days') {
-    const s = new Date(today); s.setDate(s.getDate() - 6);
-    return { start: toISODate(s), end: toISODate(today) };
-  }
-  if (preset === 'Last 14 days') {
-    const s = new Date(today); s.setDate(s.getDate() - 13);
-    return { start: toISODate(s), end: toISODate(today) };
-  }
-  if (preset === 'Last 30 days') {
-    const s = new Date(today); s.setDate(s.getDate() - 29);
-    return { start: toISODate(s), end: toISODate(today) };
-  }
-  if (preset === 'Month to date') {
-    const s = new Date(today.getFullYear(), today.getMonth(), 1);
-    return { start: toISODate(s), end: toISODate(today) };
-  }
-  return { start: null, end: null };
-}
+const CLIENT_COLUMNS = [
+  { key: 'name', label: 'Client', text: true, render: (r) => (<>{r.name || r.key}{r.airtable && r.airtable !== r.name ? <small>{r.airtable}</small> : null}</>) },
+  { key: 'health', label: 'Health', text: true, render: (r) => { const p = healthPill(r.health); return <StatusPill tone={p.tone} label={p.label} />; } },
+  { key: 'spend', label: 'Spend', unit: 'currency' },
+  { key: 'leads', label: 'Leads', unit: 'number' },
+  { key: 'billed', label: 'Billed', unit: 'number' },
+  { key: 'free', label: 'Free', unit: 'number' },
+  { key: 'replacement', label: 'Replacement', unit: 'number' },
+  { key: 'unbilled', label: 'Unbilled', unit: 'number' },
+  { key: 'billedValue', label: 'Billed value', unit: 'currency' },
+  { key: 'cplBilled', label: 'CPL billed', unit: 'currency' },
+  { key: 'profit', label: 'Profit', unit: 'currency' },
+  { key: 'margin', label: 'Margin', unit: 'percent' },
+  { key: 'lastLeadDate', label: 'Last lead', text: true, render: (r) => (r.lastLeadDate ? formatDay(r.lastLeadDate, { year: false }) : DASH) },
+  { key: 'daysSinceLastLead', label: 'Days since', unit: 'number' },
+];
 
-function dateInRange(iso, range) {
-  if (!iso) return false;
-  if (!range || !range.start || !range.end) return true;
-  const datePart = iso.includes('T') ? iso.slice(0, 10) : iso;
-  return datePart >= range.start && datePart <= range.end;
-}
+const CLOSER_COLUMNS = [
+  { key: 'closer', label: 'Closer', text: true },
+  { key: 'closes', label: 'Closes', unit: 'number' },
+  { key: 'closeRate', label: 'Close rate', unit: 'percent' },
+  { key: 'attempted', label: 'Attempted', unit: 'number' },
+  { key: 'connected', label: 'Connected', unit: 'number' },
+  { key: 'contactRate', label: 'Connect rate', unit: 'percent' },
+  { key: 'offers', label: 'Offers', unit: 'number' },
+  { key: 'prospects', label: 'Prospects', unit: 'number' },
+  { key: 'contacted', label: 'Contacted', unit: 'number' },
+  { key: 'prospectContactRate', label: 'Contacted %', unit: 'percent' },
+  { key: 'booked', label: 'Booked', unit: 'number' },
+  { key: 'speedToLead', label: 'Speed to lead', unit: 'seconds' },
+  { key: 'eods', label: 'EODs', unit: 'number' },
+];
 
-// Contact rate from Prospect statuses, all-time, per closer
-// closer can be 'All' to mean every closer combined
-function computeContactRate(prospects, closer) {
-  const filtered = prospects.filter(p => closer === 'All' || p.closer === closer);
-  const total = filtered.length;
-  if (total === 0) return { total: 0, contacted: 0, uncontacted: 0, rate: 0 };
-  const uncontacted = filtered.filter(p => UNCONTACTED_STATUSES.has(p.status)).length;
-  const contacted = total - uncontacted;
-  return { total, contacted, uncontacted, rate: (contacted / total) * 100 };
-}
+const CAMPAIGN_COLUMNS = [
+  { key: 'campaign', label: 'Campaign', text: true, render: (r) => (<>{r.campaign || r.campaignId || '(unnamed)'}{r.client ? <small>{r.client}</small> : null}</>) },
+  { key: 'line', label: 'Line', text: true, render: (r) => LINE_LABEL[r.line] || r.line || DASH },
+  { key: 'spend', label: 'Spend', unit: 'currency' },
+  { key: 'fbLeads', label: 'FB leads', unit: 'number' },
+  { key: 'cpl', label: 'CPL', unit: 'currency' },
+  { key: 'clicks', label: 'Clicks', unit: 'number' },
+  { key: 'cpc', label: 'CPC', unit: 'currency' },
+  { key: 'impressions', label: 'Impressions', unit: 'number' },
+  { key: 'ctr', label: 'CTR', unit: 'percent' },
+  { key: 'rows', label: 'Days', unit: 'number', title: 'Days with a report row' },
+];
 
-// Speed to Lead — average seconds between lead landing (Created At) and first call (Time Called)
-// Only includes prospects that have BOTH created + speedToLead value set, and Created At in the window.
-function computeSpeedToLead(prospects, closer, dateRange) {
-  const eligible = prospects.filter(p =>
-    (closer === 'All' || p.closer === closer) &&
-    p.speedToLead != null &&
-    dateInRange(p.createdAt, dateRange)
+const WHOP_COLUMNS = [
+  { key: 'product', label: 'Product', text: true },
+  { key: 'gross', label: 'Cash collected', unit: 'currency' },
+  { key: 'refunded', label: 'Refunded', unit: 'currency' },
+  { key: 'count', label: 'Payments', unit: 'number' },
+];
+
+function Block({ id, title, subtitle, tools, children, bodyPad = true }) {
+  return (
+    <section className="cc-block" id={id} aria-labelledby={`${id}-h`}>
+      <header className="cc-head">
+        <h2 id={`${id}-h`}>{title}</h2>
+        {subtitle ? <p>{subtitle}</p> : null}
+        {tools ? <div className="cc-head-tools">{tools}</div> : null}
+      </header>
+      {bodyPad ? <div className="cc-body">{children}</div> : children}
+    </section>
   );
-  const called = eligible.length;
-  if (called === 0) return { avgSec: null, called: 0, totalInWindow: 0 };
-  const sum = eligible.reduce((s, p) => s + p.speedToLead, 0);
-  // How many prospects landed in this window overall (called or not)?
-  const totalInWindow = prospects.filter(p =>
-    (closer === 'All' || p.closer === closer) && dateInRange(p.createdAt, dateRange)
-  ).length;
-  return { avgSec: sum / called, called, totalInWindow };
 }
 
-export default function CloserTracker() {
-  const [activeTab, setActiveTab] = useState('dashboard');
-  const [entries, setEntries] = useState([]);
-  const [prospects, setProspects] = useState([]);
-  const [closersFromAirtable, setClosersFromAirtable] = useState([]);
+export default function CommandCenter() {
+  const [payload, setPayload] = useState(null);
+  const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [fetchedAt, setFetchedAt] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [range, setRange] = useState(DEFAULT_RANGE);
 
-  const refresh = useCallback(() => {
-    setLoading(true);
-    setError(null);
-    Promise.all([
-      fetch('/api/eod-list').then(r => r.json()),
-      fetch('/api/prospects').then(r => r.json()).catch(() => ({ prospects: [], closers: [] })),
-    ])
-      .then(([eodData, prospectsData]) => {
-        if (eodData.error) {
-          setError('EOD: ' + eodData.error + (eodData.body ? ': ' + eodData.body : ''));
-        } else {
-          setEntries(eodData.entries || []);
-        }
-        if (prospectsData && !prospectsData.error) {
-          setProspects(prospectsData.prospects || []);
-          setClosersFromAirtable(prospectsData.closers || []);
-        }
-        setFetchedAt(eodData.fetched_at || null);
-        setLoading(false);
-      })
-      .catch(err => { setError(String(err)); setLoading(false); });
+  const load = useCallback(async ({ refresh = false } = {}) => {
+    if (refresh) setRefreshing(true); else setLoading(true);
+    setError('');
+    try {
+      const r = await fetch(metricsUrl({ refresh }), { credentials: 'same-origin', cache: 'no-store' });
+      if (r.status === 401) {
+        window.location.href = `/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`;
+        return;
+      }
+      let data = null;
+      try { data = await r.json(); } catch { data = null; }
+      if (!r.ok || !data || data.error) {
+        setError((data && (data.message || data.error)) || `Could not load metrics (${r.status}).`);
+      } else {
+        setPayload(data);
+      }
+    } catch {
+      setError('Network error while loading metrics.');
+    }
+    setLoading(false);
+    setRefreshing(false);
   }, []);
 
-  useEffect(() => { refresh(); }, [refresh]);
-
-  const closers = useMemo(() => {
-    const s = new Set(closersFromAirtable);
-    for (const e of entries) if (e.closer) s.add(e.closer);
-    const list = Array.from(s).sort();
-    return list.length > 0 ? list : FALLBACK_CLOSERS;
-  }, [closersFromAirtable, entries]);
-
-  return (
-    <div style={{
-      minHeight: '100vh',
-      background: '#f4f1ec',
-      fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, sans-serif',
-      color: '#1f1b16',
-      padding: '36px 28px 64px',
-      WebkitFontSmoothing: 'antialiased',
-      lineHeight: 1.5,
-    }}>
-      <div style={{ maxWidth: 1240, margin: '0 auto' }}>
-
-        <header style={{ marginBottom: 24, display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.12em', color: '#8a7d6b', textTransform: 'uppercase', marginBottom: 6 }}>
-              Clover · Closer Performance
-            </div>
-            <h1 style={{ margin: 0, fontSize: 32, fontWeight: 600, letterSpacing: '-0.02em' }}>Closer Dashboard</h1>
-            <div style={{ fontSize: 12, color: '#8a7d6b', marginTop: 4 }}>
-              {loading ? 'Loading…' : fetchedAt ? `Live from Airtable · synced ${new Date(fetchedAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}` : 'Live from Airtable'}
-            </div>
-          </div>
-          <button onClick={refresh} style={{
-            fontSize: 12, padding: '8px 14px', background: 'transparent', color: '#1f1b16',
-            border: '1px solid #d3cfc5', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit',
-          }}>Refresh</button>
-        </header>
-
-        <Tabs activeTab={activeTab} setActiveTab={setActiveTab} />
-
-        {error && (
-          <div style={{ padding: 14, marginBottom: 16, background: '#f6e6e2', border: '1px solid #e8c8be', borderRadius: 12, fontSize: 12.5 }}>
-            <div style={{ color: '#9a3924', fontWeight: 500 }}>Couldn't load data</div>
-            <div style={{ color: '#5e5345', marginTop: 4 }}>{error}</div>
-          </div>
-        )}
-
-        {activeTab === 'dashboard' && <Dashboard entries={entries} prospects={prospects} closers={closers} loading={loading} />}
-        {activeTab === 'leaderboard' && <Leaderboard entries={entries} prospects={prospects} closers={closers} />}
-        {activeTab === 'eod' && <EodForm entries={entries} closers={closers} onSubmitted={refresh} />}
-
-        <div style={{ fontSize: 11.5, color: '#a99c87', textAlign: 'center', marginTop: 28, lineHeight: 1.7 }}>
-          Calls, offers, closes & close rate from Closer EOD (date-filtered). Contact rate from Prospect statuses (all-time, per closer). Speed to Lead from Prospect Created At → Time Called (date-filtered by lead arrival).
-        </div>
-
-      </div>
-    </div>
-  );
-}
-
-function Tabs({ activeTab, setActiveTab }) {
-  const tabs = [
-    { id: 'dashboard',  label: 'Dashboard' },
-    { id: 'leaderboard',label: 'Leaderboard' },
-    { id: 'eod',        label: 'EOD Report' },
-  ];
-  return (
-    <div style={{
-      display: 'flex', gap: 4, marginBottom: 18, padding: 4,
-      background: '#ece8df', borderRadius: 11, width: 'fit-content',
-    }}>
-      {tabs.map(t => (
-        <button key={t.id} onClick={() => setActiveTab(t.id)} style={{
-          padding: '9px 18px', border: 'none',
-          background: activeTab === t.id ? 'white' : 'transparent',
-          color: activeTab === t.id ? '#1f1b16' : '#5e5345',
-          fontSize: 13, fontWeight: 500,
-          borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit',
-          boxShadow: activeTab === t.id ? '0 1px 3px rgba(0,0,0,0.04)' : 'none',
-        }}>{t.label}</button>
-      ))}
-    </div>
-  );
-}
-
-function DateFilter({ datePreset, setDatePreset, customStart, setCustomStart, customEnd, setCustomEnd }) {
-  if (datePreset === 'Custom') {
-    return (
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
-        <SelectInline value={datePreset} onChange={setDatePreset} options={DATE_PRESETS} />
-        <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} style={{ ...inputStyle, cursor: 'text' }} />
-        <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} style={{ ...inputStyle, cursor: 'text' }} />
-      </div>
-    );
-  }
-  return <SelectInline value={datePreset} onChange={setDatePreset} options={DATE_PRESETS} />;
-}
-
-function Dashboard({ entries, prospects, closers, loading }) {
-  const [closer, setCloser] = useState('All');
-  const [datePreset, setDatePreset] = useState('Last 7 days');
-  const [customStart, setCustomStart] = useState(todayISO());
-  const [customEnd, setCustomEnd] = useState(todayISO());
-
   useEffect(() => {
-    if (closer !== 'All' && closers.length > 0 && !closers.includes(closer)) {
-      setCloser('All');
-    }
-  }, [closers, closer]);
-
-  const dateRange = useMemo(() => {
-    if (datePreset === 'Custom') return { start: customStart, end: customEnd };
-    return presetToRange(datePreset);
-  }, [datePreset, customStart, customEnd]);
-
-  const closerOptions = useMemo(() => ['All', ...closers], [closers]);
-
-  const filteredEod = useMemo(() =>
-    entries.filter(e =>
-      (closer === 'All' || e.closer === closer) && dateInRange(e.date, dateRange)
-    ),
-    [entries, closer, dateRange]
-  );
-
-  const calls = filteredEod.reduce((s, e) => s + e.calls, 0);
-  const offers = filteredEod.reduce((s, e) => s + e.offers, 0);
-  const closes = filteredEod.reduce((s, e) => s + e.closes, 0);
-  const closeRate = calls > 0 ? (closes / calls) * 100 : 0;
-
-  // Contact rate is all-time, NOT date-filtered, per closer
-  const contact = useMemo(() => computeContactRate(prospects, closer), [prospects, closer]);
-
-  // Speed to Lead IS date-filtered (by Created At)
-  const speed = useMemo(() => computeSpeedToLead(prospects, closer, dateRange), [prospects, closer, dateRange]);
-
-  const closeRateGood = calls > 0 && closeRate >= 20;
-  const contactRateGood = contact.total > 0 && contact.rate >= 80;
-  const speedGood = speed.avgSec != null && speed.avgSec <= 300; // 5 min or better
-
-  return (
-    <>
-      <div style={{ background: 'white', border: '1px solid #e8e3da', borderRadius: 14, padding: 12, marginBottom: 18, display: 'grid', gridTemplateColumns: '1fr 1.6fr', gap: 10, alignItems: 'start' }}>
-        <SelectInline value={closer} onChange={setCloser} options={closerOptions} />
-        <DateFilter
-          datePreset={datePreset} setDatePreset={setDatePreset}
-          customStart={customStart} setCustomStart={setCustomStart}
-          customEnd={customEnd} setCustomEnd={setCustomEnd}
-        />
-      </div>
-
-      <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: '0.14em', color: '#8a7d6b', textTransform: 'uppercase', marginBottom: 10, paddingLeft: 4 }}>
-        Performance
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 10, marginBottom: 22 }}>
-        <Kpi
-          label="Calls Connected"
-          value={calls}
-          sub={`${filteredEod.length} EOD ${filteredEod.length === 1 ? 'entry' : 'entries'}`}
-        />
-        <Kpi
-          label="Offers Given"
-          value={offers}
-          sub={calls > 0 ? `${offers}/${calls} calls` : '—'}
-        />
-        <Kpi
-          label="Closes"
-          value={closes}
-          sub={offers > 0 ? `${closes}/${offers} offers` : '—'}
-          tone="accent"
-        />
-        <Kpi
-          label="Close Rate"
-          value={calls > 0 ? fmtPct1(closeRate) : '—'}
-          sub={calls > 0 ? 'closes ÷ calls' : 'No calls in window'}
-          tone={closeRateGood ? 'good' : 'default'}
-        />
-        <Kpi
-          label="Contact Rate"
-          value={contact.total > 0 ? fmtPct1(contact.rate) : '—'}
-          sub={contact.total > 0 ? `${contact.contacted}/${contact.total} prospects (all-time)` : 'No prospects assigned'}
-          tone={contactRateGood ? 'good' : 'default'}
-        />
-        <Kpi
-          label="Speed to Lead"
-          value={fmtSpeedToLead(speed.avgSec)}
-          sub={speed.called > 0 ? `${speed.called}/${speed.totalInWindow} leads called` : 'No leads called in window'}
-          tone={speedGood ? 'good' : 'default'}
-        />
-      </div>
-
-      <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: '0.14em', color: '#8a7d6b', textTransform: 'uppercase', marginBottom: 10, paddingLeft: 4 }}>
-        Recent EOD submissions
-      </div>
-      <Card>
-        {loading ? (
-          <div style={{ padding: 32, textAlign: 'center', color: '#8a7d6b', fontSize: 13 }}>Loading…</div>
-        ) : filteredEod.length === 0 ? (
-          <div style={{ padding: 32, textAlign: 'center', color: '#8a7d6b', fontSize: 13 }}>No submissions in this window.</div>
-        ) : (
-          filteredEod.map((e, i) => <PastEntry key={e.id} entry={e} first={i === 0} />)
-        )}
-      </Card>
-    </>
-  );
-}
-
-function Leaderboard({ entries, prospects, closers }) {
-  const [datePreset, setDatePreset] = useState('Last 7 days');
-  const [customStart, setCustomStart] = useState(todayISO());
-  const [customEnd, setCustomEnd] = useState(todayISO());
-
-  const dateRange = useMemo(() => {
-    if (datePreset === 'Custom') return { start: customStart, end: customEnd };
-    return presetToRange(datePreset);
-  }, [datePreset, customStart, customEnd]);
-
-  const rows = closers.map(c => {
-    const filteredEod = entries.filter(e => e.closer === c && dateInRange(e.date, dateRange));
-    const calls = filteredEod.reduce((s, e) => s + e.calls, 0);
-    const offers = filteredEod.reduce((s, e) => s + e.offers, 0);
-    const closes = filteredEod.reduce((s, e) => s + e.closes, 0);
-    const contact = computeContactRate(prospects, c);
-    const speed = computeSpeedToLead(prospects, c, dateRange);
-    return {
-      closer: c,
-      calls, offers, closes,
-      closeRate: calls > 0 ? (closes / calls) * 100 : 0,
-      contactRate: contact.rate,
-      contactTotal: contact.total,
-      speedAvgSec: speed.avgSec,
-      speedCalled: speed.called,
-    };
-  }).sort((a, b) => {
-    if (b.closeRate !== a.closeRate) return b.closeRate - a.closeRate;
-    return b.closes - a.closes;
-  });
-
-  return (
-    <>
-      <div style={{ background: 'white', border: '1px solid #e8e3da', borderRadius: 14, padding: 12, marginBottom: 18 }}>
-        <DateFilter
-          datePreset={datePreset} setDatePreset={setDatePreset}
-          customStart={customStart} setCustomStart={setCustomStart}
-          customEnd={customEnd} setCustomEnd={setCustomEnd}
-        />
-      </div>
-
-      <Card>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-          <thead>
-            <tr style={{ background: '#faf7f1' }}>
-              <Th style={{ width: 60 }}>Rank</Th>
-              <Th>Closer</Th>
-              <Th right>Calls</Th>
-              <Th right>Offers</Th>
-              <Th right>Closes</Th>
-              <Th right>Close rate</Th>
-              <Th right>Contact rate</Th>
-              <Th right>Speed to lead</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r, i) => {
-              const rankBg = i === 0 ? '#fdf2dc' : i === 1 ? '#ece8df' : i === 2 ? '#f5e9dc' : '#f4efe7';
-              const rankColor = i === 0 ? '#8a6310' : i === 1 ? '#5e5345' : i === 2 ? '#8a5e2d' : '#8a7d6b';
-              return (
-                <Tr key={r.closer} first={i === 0}>
-                  <Td>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: '50%', fontSize: 13, fontWeight: 600, background: rankBg, color: rankColor }}>{i + 1}</span>
-                  </Td>
-                  <Td style={{ fontWeight: 500, color: '#1f1b16' }}>{r.closer}</Td>
-                  <Td right>{r.calls}</Td>
-                  <Td right>{r.offers}</Td>
-                  <Td right>{r.closes}</Td>
-                  <Td right>{r.calls > 0 ? fmtPct1(r.closeRate) : '—'}</Td>
-                  <Td right>{r.contactTotal > 0 ? fmtPct1(r.contactRate) : '—'}</Td>
-                  <Td right>{fmtSpeedToLead(r.speedAvgSec)}</Td>
-                </Tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </Card>
-    </>
-  );
-}
-
-function EodForm({ entries, closers, onSubmitted }) {
-  const [closer, setCloser] = useState(closers[0] || 'Tyler');
-  const [date, setDate] = useState(todayISO());
-  const [energy, setEnergy] = useState(null);
-  const [focus, setFocus] = useState(null);
-  const [biology, setBiology] = useState(null);
-  const [calls, setCalls] = useState('');
-  const [offers, setOffers] = useState('');
-  const [closes, setCloses] = useState('');
-  const [rollup, setRollup] = useState('');
-  const [objections, setObjections] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [toast, setToast] = useState(null);
-
-  useEffect(() => {
-    if (closers.length > 0 && !closers.includes(closer)) {
-      setCloser(closers[0]);
-    }
-  }, [closers, closer]);
-
-  useEffect(() => {
-    const existing = entries.find(e => e.closer === closer && e.date === date);
-    if (existing) {
-      setEnergy(existing.energy);
-      setFocus(existing.focus);
-      setBiology(existing.biology ? 'Yes' : null);
-      setCalls(String(existing.calls ?? ''));
-      setOffers(String(existing.offers ?? ''));
-      setCloses(String(existing.closes ?? ''));
-      setRollup(existing.rollup ?? '');
-      setObjections(existing.objections ?? '');
-    } else {
-      setEnergy(null); setFocus(null); setBiology(null);
-      setCalls(''); setOffers(''); setCloses('');
-      setRollup(''); setObjections('');
-    }
-  }, [closer, date, entries]);
-
-  const callsNum = Number(calls) || 0;
-  const offersNum = Number(offers) || 0;
-  const closesNum = Number(closes) || 0;
-  const offerRate = callsNum > 0 ? (offersNum / callsNum) * 100 : 0;
-  const closeOfCall = callsNum > 0 ? (closesNum / callsNum) * 100 : 0;
-
-  const handleClear = () => {
-    setEnergy(null); setFocus(null); setBiology(null);
-    setCalls(''); setOffers(''); setCloses('');
-    setRollup(''); setObjections('');
-  };
-
-  const handleSubmit = async () => {
-    if (callsNum === 0 && offersNum === 0 && closesNum === 0) {
-      setToast({ msg: 'Add at least one metric before submitting.', error: true });
-      setTimeout(() => setToast(null), 2400);
-      return;
-    }
-    setSubmitting(true);
     try {
-      const res = await fetch('/api/eod-submit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          closer, date,
-          energy, focus,
-          biology: biology === 'Yes',
-          calls: callsNum, offers: offersNum, closes: closesNum,
-          rollup, objections,
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok || json.error) {
-        setToast({ msg: 'Save failed. ' + (json.error || ''), error: true });
-      } else {
-        setToast({ msg: json.replaced ? 'EOD updated.' : 'EOD submitted.', error: false });
-        onSubmitted && onSubmitted();
-      }
-    } catch (err) {
-      setToast({ msg: 'Network error.', error: true });
-    }
-    setSubmitting(false);
-    setTimeout(() => setToast(null), 2400);
+      const saved = window.localStorage.getItem(RANGE_STORAGE_KEY);
+      if (saved && ['today', 'yesterday', 'l7d', 'l30d', 'mtd', 'lastMonth'].includes(saved)) setRange(saved);
+    } catch { /* storage unavailable */ }
+    load();
+  }, [load]);
+
+  const changeRange = (id) => {
+    setRange(id);
+    try { window.localStorage.setItem(RANGE_STORAGE_KEY, id); } catch { /* ignore */ }
   };
 
+  const lockCeo = async () => {
+    try { await fetch('/api/ceo', { method: 'DELETE', credentials: 'same-origin' }); } catch { /* ignore */ }
+    load();
+  };
+
+  const p = payload;
+  const selected = p && p.ranges && p.ranges[range] ? range : DEFAULT_RANGE;
+  const ceoLocked = !!(p && p.ceo && p.ceo.locked);
+  const demo = !!(p && p.mode === 'demo');
+
+  const formulaGroups = useMemo(() => {
+    if (!p) return [];
+    const groups = [];
+    if (p.ceo && !p.ceo.locked && p.ceo.rows) groups.push({ id: 'ceo', title: p.ceo.title || 'CEO', rows: p.ceo.rows });
+    for (const s of p.sections || []) groups.push({ id: s.id, title: s.title, rows: s.rows });
+    return groups;
+  }, [p]);
+
+  const sourceSummary = useMemo(() => {
+    if (!p || !p.sources) return null;
+    const counts = {};
+    for (const s of Object.values(p.sources)) counts[s.status] = (counts[s.status] || 0) + 1;
+    return counts;
+  }, [p]);
+
   return (
-    <>
-      <Card style={{ padding: '24px 26px' }}>
+    <div className="cc">
+      <Head><title>Clover · Command Center</title></Head>
+      <style dangerouslySetInnerHTML={{ __html: CSS }} />
 
-        <FormSection title="Who & when" first>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-            <Field label="Closer">
-              <SelectInline value={closer} onChange={setCloser} options={closers} />
-            </Field>
-            <Field label="Date">
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} />
-            </Field>
+      <div className="cc-top">
+        <div className="cc-top-in">
+          <div>
+            <div className="cc-title">Command Center</div>
+            <div className="cc-sub">
+              {p ? `${formatDay(p.today, { weekday: true })} · ${p.tz}` : 'Loading…'}
+              {demo ? ' · demo data' : ''}
+            </div>
           </div>
-        </FormSection>
-
-        <FormSection title="Self-assessment">
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-            <Field label="Energy today">
-              <ScaleRow value={energy} onChange={setEnergy} />
-            </Field>
-            <Field label="Focus today">
-              <ScaleRow value={focus} onChange={setFocus} />
-            </Field>
+          <nav className="cc-nav" aria-label="Command Center pages">
+            <a href="/" className="on">Command Center</a>
+            <a href="/daily">Daily breakdown</a>
+            <a href="#sources">Data sources</a>
+          </nav>
+          <div className="cc-top-right">
+            <span className="cc-asof">Data as of <b>{p && p.generatedAt ? formatTimestamp(p.generatedAt, p.tz) : DASH}</b></span>
+            <button type="button" className="cc-btn" onClick={() => load({ refresh: true })} disabled={loading || refreshing} aria-label="Refresh every data source">
+              {refreshing ? 'Refreshing…' : 'Refresh'}
+            </button>
           </div>
-          <div style={{ marginTop: 18 }}>
-            <Field label="Protected my biology (food, water, exercise, sleep)">
-              <YnRow value={biology} onChange={setBiology} style={{ maxWidth: 220 }} />
-            </Field>
-          </div>
-        </FormSection>
-
-        <FormSection title="Today's metrics">
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-            <Field label="Calls connected"><input type="number" min="0" value={calls} onChange={(e) => setCalls(e.target.value)} placeholder="0" style={inputStyle} /></Field>
-            <Field label="Offers given"><input type="number" min="0" value={offers} onChange={(e) => setOffers(e.target.value)} placeholder="0" style={inputStyle} /></Field>
-            <Field label="Closes"><input type="number" min="0" value={closes} onChange={(e) => setCloses(e.target.value)} placeholder="0" style={inputStyle} /></Field>
-          </div>
-          <div style={{ fontSize: 11.5, color: '#8a7d6b', marginTop: 12, padding: '10px 12px', background: '#faf7f1', borderRadius: 8 }}>
-            {(callsNum === 0 && offersNum === 0 && closesNum === 0) ? 'Rates will calculate once you fill in the metrics.' : (
-              <>Offer rate: <strong>{offerRate.toFixed(1)}%</strong> · Close rate: <strong>{closeOfCall.toFixed(1)}%</strong></>
-            )}
-          </div>
-        </FormSection>
-
-        <FormSection title="Roll-up">
-          <Field label="Daily roll-up — breakdown of all calls you took">
-            <textarea value={rollup} onChange={(e) => setRollup(e.target.value)} placeholder="One line per call: prospect name, outcome, key takeaway…" style={{ ...inputStyle, minHeight: 90, resize: 'vertical', cursor: 'text' }} />
-          </Field>
-          <Field label="Most common objections you heard today">
-            <textarea value={objections} onChange={(e) => setObjections(e.target.value)} placeholder="What came up most often today?" style={{ ...inputStyle, minHeight: 70, resize: 'vertical', cursor: 'text' }} />
-          </Field>
-        </FormSection>
-
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
-          <button onClick={handleClear} disabled={submitting} style={{
-            padding: '11px 18px', background: 'transparent', color: '#1f1b16',
-            border: '1px solid #d3cfc5', borderRadius: 11, cursor: 'pointer',
-            fontSize: 13, fontWeight: 500, fontFamily: 'inherit',
-          }}>Clear form</button>
-          <button onClick={handleSubmit} disabled={submitting} style={{
-            padding: '11px 22px', background: '#1f1b16', color: '#f4f1ec',
-            border: 'none', borderRadius: 11, cursor: submitting ? 'wait' : 'pointer',
-            fontSize: 13, fontWeight: 500, fontFamily: 'inherit',
-            opacity: submitting ? 0.7 : 1,
-          }}>{submitting ? 'Saving…' : 'Submit EOD report'}</button>
         </div>
-
-      </Card>
-
-      {toast && (
-        <div style={{
-          position: 'fixed', bottom: 28, left: '50%', transform: 'translateX(-50%)',
-          background: toast.error ? '#9a3924' : '#1f1b16',
-          color: '#f4f1ec', padding: '12px 22px', borderRadius: 11,
-          fontSize: 13, fontWeight: 500, boxShadow: '0 4px 24px rgba(0,0,0,0.15)',
-        }}>{toast.msg}</div>
-      )}
-    </>
-  );
-}
-
-function Card({ children, style = {} }) {
-  return <div style={{
-    background: 'white', border: '1px solid #e8e3da', borderRadius: 14,
-    boxShadow: '0 1px 0 rgba(0,0,0,0.02), 0 4px 14px -8px rgba(60,40,20,0.06)',
-    overflow: 'hidden', ...style,
-  }}>{children}</div>;
-}
-
-function Kpi({ label, value, sub, tone = 'default' }) {
-  const palette = {
-    default: { bg: 'white', border: '#e8e3da', labelColor: '#8a7d6b', valueColor: '#1f1b16', subColor: '#8a7d6b' },
-    accent:  { bg: '#e8e4ff', border: '#d4ccff', labelColor: '#4c3fb5', valueColor: '#1f1b16', subColor: '#4c3fb5' },
-    good:    { bg: '#e8f3e3', border: '#c8e0bc', labelColor: '#3a6b29', valueColor: '#1f1b16', subColor: '#3a6b29' },
-    warn:    { bg: '#fdf2dc', border: '#f0d99b', labelColor: '#8a6310', valueColor: '#1f1b16', subColor: '#8a6310' },
-    muted:   { bg: 'white', border: '#e8e3da', labelColor: '#8a7d6b', valueColor: '#a99c87', subColor: '#a99c87' },
-  }[tone] || { bg: 'white', border: '#e8e3da', labelColor: '#8a7d6b', valueColor: '#1f1b16', subColor: '#8a7d6b' };
-  return (
-    <div style={{ background: palette.bg, border: `1px solid ${palette.border}`, borderRadius: 14, padding: '14px 16px', minWidth: 0 }}>
-      <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: palette.labelColor, marginBottom: 8 }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 600, color: palette.valueColor, fontVariantNumeric: 'tabular-nums' }}>{value}</div>
-      {sub && <div style={{ fontSize: 11.5, color: palette.subColor, marginTop: 4 }}>{sub}</div>}
-    </div>
-  );
-}
-
-const inputStyle = {
-  width: '100%', appearance: 'none', background: 'white',
-  border: '1px solid #e8e3da', borderRadius: 11,
-  padding: '10px 13px', fontSize: 13.5, color: '#1f1b16',
-  fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box',
-};
-
-function SelectInline({ value, onChange, options }) {
-  return (
-    <div style={{ position: 'relative' }}>
-      <select value={value} onChange={(e) => onChange(e.target.value)} style={{ ...inputStyle, paddingRight: 36, cursor: 'pointer' }}>
-        {options.map(o => <option key={o} value={o}>{o}</option>)}
-      </select>
-      <div style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-65%) rotate(45deg)', width: 7, height: 7, borderRight: '1.5px solid #8a7d6b', borderBottom: '1.5px solid #8a7d6b', pointerEvents: 'none' }} />
-    </div>
-  );
-}
-
-function FormSection({ title, children, first }) {
-  return (
-    <div style={{ paddingTop: first ? 0 : 18, marginTop: first ? 0 : 18, borderTop: first ? 'none' : '1px solid #f1ece4' }}>
-      <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.12em', color: '#8a7d6b', textTransform: 'uppercase', marginBottom: 16 }}>{title}</div>
-      {children}
-    </div>
-  );
-}
-
-function Field({ label, children }) {
-  return (
-    <div style={{ marginBottom: 14 }}>
-      <label style={{ fontSize: 13, fontWeight: 500, color: '#1f1b16', marginBottom: 8, display: 'block', lineHeight: 1.4 }}>{label}</label>
-      {children}
-    </div>
-  );
-}
-
-function ScaleRow({ value, onChange }) {
-  return (
-    <div style={{ display: 'flex', gap: 5 }}>
-      {[1,2,3,4,5,6,7,8,9,10].map(n => {
-        const selected = value === n;
-        return (
-          <button key={n} type="button" onClick={() => onChange(n)} style={{
-            flex: 1, padding: '9px 0',
-            border: '1px solid ' + (selected ? '#1f1b16' : '#e8e3da'),
-            borderRadius: 8,
-            background: selected ? '#1f1b16' : 'white',
-            color: selected ? '#f4f1ec' : '#3a3128',
-            fontSize: 12.5, cursor: 'pointer', fontFamily: 'inherit',
-            fontVariantNumeric: 'tabular-nums',
-          }}>{n}</button>
-        );
-      })}
-    </div>
-  );
-}
-
-function YnRow({ value, onChange, style = {} }) {
-  return (
-    <div style={{ display: 'flex', gap: 6, ...style }}>
-      {['Yes', 'No'].map(label => {
-        const selected = value === label;
-        const selectedBg = label === 'Yes' ? '#e8f3e3' : '#f6e6e2';
-        const selectedBorder = label === 'Yes' ? '#c8e0bc' : '#e8c8be';
-        const selectedColor = label === 'Yes' ? '#3a6b29' : '#9a3924';
-        return (
-          <button key={label} type="button" onClick={() => onChange(label)} style={{
-            flex: 1, padding: '9px 0',
-            border: '1px solid ' + (selected ? selectedBorder : '#e8e3da'),
-            borderRadius: 8,
-            background: selected ? selectedBg : 'white',
-            color: selected ? selectedColor : '#3a3128',
-            fontWeight: selected ? 500 : 400,
-            fontSize: 12.5, cursor: 'pointer', fontFamily: 'inherit',
-          }}>{label}</button>
-        );
-      })}
-    </div>
-  );
-}
-
-function Th({ children, right, style = {} }) {
-  return <th style={{
-    textAlign: right ? 'right' : 'left', padding: '11px 16px',
-    fontSize: 10.5, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
-    color: '#8a7d6b', borderBottom: '1px solid #efe9e0', whiteSpace: 'nowrap', ...style,
-  }}>{children}</th>;
-}
-
-function Tr({ children, first }) {
-  return <tr style={{ borderTop: first ? 'none' : '1px solid #f4efe7' }}>{children}</tr>;
-}
-
-function Td({ children, right, style = {} }) {
-  return <td style={{ padding: '12px 16px', textAlign: right ? 'right' : 'left', color: '#3a3128', fontVariantNumeric: 'tabular-nums', verticalAlign: 'middle', ...style }}>{children}</td>;
-}
-
-function PastEntry({ entry, first }) {
-  const submittedAt = entry.submittedAt ? new Date(entry.submittedAt) : null;
-  const timeStr = submittedAt ? submittedAt.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—';
-  return (
-    <div style={{ padding: '16px 20px', borderTop: first ? 'none' : '1px solid #f4efe7' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
-        <div style={{ fontSize: 13, fontWeight: 500 }}>{entry.date} · {entry.closer}</div>
-        <div style={{ fontSize: 11.5, color: '#8a7d6b' }}>submitted {timeStr}</div>
       </div>
-      <div style={{ fontSize: 12, color: '#5e5345' }}>
-        <strong style={{ color: '#1f1b16', fontWeight: 500 }}>{entry.calls}</strong> calls ·
-        {' '}<strong style={{ color: '#1f1b16', fontWeight: 500 }}>{entry.offers}</strong> offers ·
-        {' '}<strong style={{ color: '#1f1b16', fontWeight: 500 }}>{entry.closes}</strong> closes ·
-        {' '}Energy <strong style={{ color: '#1f1b16', fontWeight: 500 }}>{entry.energy ?? '—'}</strong>/10 ·
-        {' '}Focus <strong style={{ color: '#1f1b16', fontWeight: 500 }}>{entry.focus ?? '—'}</strong>/10
-      </div>
+
+      <main className="cc-wrap">
+        {error ? (
+          <div className="cc-banner err" role="alert">
+            <strong>Could not load the dashboard.</strong> {error}{' '}
+            <button type="button" className="cc-btn" style={{ marginLeft: 8 }} onClick={() => load()}>Try again</button>
+          </div>
+        ) : null}
+
+        {demo ? <div className="cc-banner info" role="status">Demo data: every number on this page is synthetic. Remove <code>?demo=1</code> to see live sources.</div> : null}
+
+        {!p && loading ? <div className="cc-block cc-skel" aria-busy="true">Loading the Command Center…</div> : null}
+
+        {p ? (
+          <>
+            <RangeChips ranges={p.ranges} value={selected} onChange={changeRange} />
+
+            <Block
+              id="ceo"
+              title="CEO today — Total company"
+              subtitle={p.ceo && p.ceo.subtitle ? p.ceo.subtitle : 'Cash in, every tracked cost, and what is left.'}
+              tools={!ceoLocked && p.ceoConfigured ? <button type="button" className="cc-btn" onClick={lockCeo}>Lock</button> : null}
+              bodyPad={!ceoLocked}
+            >
+              {ceoLocked
+                ? <UnlockCard configured={p.ceoConfigured} onUnlocked={() => load()} />
+                : <CeoTable section={p.ceo} ranges={p.ranges} series={p.series} selected={selected} />}
+            </Block>
+
+            {(p.sections || []).map(s => (
+              <Block key={s.id} id={`section-${s.id}`} title={s.title} subtitle={s.subtitle}>
+                <SectionTable section={s} weeks={p.weeks} ranges={p.ranges} series={p.series} selected={selected} />
+              </Block>
+            ))}
+
+            <Block id="clients" title="Clients (MTD)" subtitle="Every Home Service client with spend or leads this month. Health: at risk = spend but no lead in 3 days; stalled = no lead in 7 days.">
+              <DetailTable label="Clients, month to date" columns={CLIENT_COLUMNS} rows={p.tables?.clients || []} rowKey="key" defaultSort={{ key: 'spend', dir: 'desc' }} empty="No client activity this month." />
+            </Block>
+
+            <Block id="closers" title="Closers (MTD)" subtitle="Closer EOD reports joined to the Prospect table by closer name.">
+              <DetailTable label="Closers, month to date" columns={CLOSER_COLUMNS} rows={p.tables?.closers || []} rowKey="closer" defaultSort={{ key: 'closes', dir: 'desc' }} empty="No closer activity this month." />
+            </Block>
+
+            <Block id="campaigns" title="Campaigns (MTD)" subtitle="Every ad campaign with spend this month and the line it was classified into.">
+              <DetailTable label="Campaigns, month to date" columns={CAMPAIGN_COLUMNS} rows={p.tables?.campaigns || []} rowKey={(r) => r.campaignId || r.campaign} defaultSort={{ key: 'spend', dir: 'desc' }} empty="No campaign spend this month." />
+            </Block>
+
+            <Block id="whop" title="Whop products (MTD)" subtitle="Cash collected per product from Whop payments.">
+              <DetailTable label="Whop products, month to date" columns={WHOP_COLUMNS} rows={p.tables?.whopProducts || []} rowKey="product" defaultSort={{ key: 'gross', dir: 'desc' }} empty="No Whop payments this month." />
+            </Block>
+
+            <Block
+              id="sources"
+              title="Data sources"
+              subtitle={sourceSummary ? Object.entries(sourceSummary).map(([k, n]) => `${n} ${k}`).join(' · ') : ''}
+              bodyPad={false}
+            >
+              <SourcesPanel sources={p.sources} warnings={p.warnings || []} tz={p.tz} />
+            </Block>
+
+            <Formulas groups={formulaGroups} />
+
+            <footer className="cc-foot">
+              <span>Month {p.month} · {formatValue((p.elapsedFraction || 0) * 100, 'percent')} elapsed</span>
+              <span>Generated {p.generatedAt ? formatTimestamp(p.generatedAt, p.tz) : DASH}</span>
+              <span>Times in {p.tz}</span>
+            </footer>
+          </>
+        ) : null}
+      </main>
     </div>
   );
 }

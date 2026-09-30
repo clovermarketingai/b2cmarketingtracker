@@ -18,7 +18,7 @@ const CSS = `
 `;
 
 // Where to land after sign-in when there is no usable ?next= param.
-const HOME = '/daily';
+const HOME = '/';
 
 // Only ever redirect to a same-origin path. The value is resolved with the URL
 // parser and its origin re-checked, so tricks like "/\t/evil.com" (tab/newline
