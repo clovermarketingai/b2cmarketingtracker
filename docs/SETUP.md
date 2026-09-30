@@ -79,7 +79,7 @@ Same names as the HQ app, so the values copy across.
 | Variable | Required | What it is for |
 |---|---|---|
 | `WHOP_API_KEY` | for the CEO cash rows | API key from the Whop dashboard developer settings. |
-| `WHOP_COMPANY_ID` | for the CEO cash rows | Your company id, `biz_…`. |
+| `WHOP_COMPANY_ID` | optional | Your company id, `biz_…`. Only needed if Whop answers that the key requires a company id; a company API key is already scoped to its company. |
 | `WHOP_AMOUNTS_IN_CENTS` | `0` | Set to `1` only if Whop returns integer cents. See [Whop connection](#3-whop-connection). |
 
 ---
@@ -148,7 +148,7 @@ await (await fetch('/api/setup', { method: 'POST' })).json()
 Cash collected, refunds and processor fees come from `GET https://api.whop.com/api/v1/payments` for your company.
 
 1. **API key.** Whop dashboard → Developer settings → create an API key with read access to payments. Set it as `WHOP_API_KEY`.
-2. **Company id.** The `biz_…` id shown in the same developer settings (also in the dashboard URL). Set it as `WHOP_COMPANY_ID`.
+2. **Company id (optional).** A company API key is already tied to your company, so leave `WHOP_COMPANY_ID` unset. If the Data sources panel says Whop wants a company id, set it to the `biz_…` id shown in the same developer settings (also in the dashboard URL).
 3. Redeploy. The Data sources panel should show *Whop payments: ok* with a payment count.
 
 **What is counted.** Only payments whose `status` is one of `paid`, `succeeded`, `completed`, `partially_refunded`, `refunded`. Every other status (pending, failed, draft, void, …) is dropped and tallied in the source's `meta.statuses`. Each kept payment is dated by the **business calendar day of `paid_at`** (falling back to `created_at`). Cash collected = `total` (fallbacks: `final_amount`, `amount`, `subtotal`); refunds = `refunded_amount`, attributed to the payment's own date; processor fees = `total − amount_after_fees` when Whop reports it (fallback `application_fee.amount`). When fees are missing on some payments the fees row is understated and a warning says for how many. Payments in a non-USD currency are summed at face value (no FX) and flagged.
@@ -342,7 +342,7 @@ The panel at the bottom of the dashboard (and `payload.sources` in the API) list
 
 - **Facebook ads (Windsor.ai)** — `401`/`403`: bad `WINDSOR_API_KEY`. *response has no data array*: Windsor answered with an error body; check the account is connected in Windsor. Spend in *Unclassified ads*: fix the campaign name or add an `ADS_LINE_RULES` entry. *campaign … is not in lib/clients.js*: add the client to the rate card so its leads join.
 - **Home Service leads / clients / prospects / Closer EOD (Airtable)** — `401` `AUTHENTICATION_REQUIRED`: token invalid. `403` `NOT_AUTHORIZED`: the token was not granted this base. `404` `TABLE_NOT_FOUND`: a table id override is wrong. `422` `INVALID_FILTER_BY_FORMULA`: a field name the filter uses is missing (the prospect pull tries narrower formulas automatically and warns). *Lead Cost the dashboard does not recognise*: add the value to the select or rename it to a price / `Free` / `Replacement` / `Prepay` / `Unbilled`. A hit on the 20,000-record cap is reported as a warning, never truncated silently.
-- **Whop payments** — `401`: key invalid or lacks payment read permission. Empty with a valid key: check `WHOP_COMPANY_ID` is the `biz_…` id. Numbers 100× too big: set `WHOP_AMOUNTS_IN_CENTS=1`. *fees are only reported for N of M payments*: Whop omitted `amount_after_fees` on some payments; the fees row is understated.
+- **Whop payments** — `401`: key invalid or lacks payment read permission. Empty with a valid key: the key may belong to a different company, or Whop wants `WHOP_COMPANY_ID` (the panel says so). Numbers 100× too big: set `WHOP_AMOUNTS_IN_CENTS=1`. *fees are only reported for N of M payments*: Whop omitted `amount_after_fees` on some payments; the fees row is understated.
 - **Dashboard Costs / Targets (Airtable)** — `unconfigured` with a table hint: run `POST /api/setup`. `GET /api/setup` answering `502`, or the cron reporting `no_table` although the table exists: the token lacks `schema.bases:read`. *metrics the dashboard does not know*: the `Metric` cell is not a row id; copy it from METRICS.md. *Month must be YYYY-MM*: fix the `Month` cell.
 - **Tax B2B CRM (Airtable)** — `unconfigured`: set `AIRTABLE_CRM_BASE` (and `AIRTABLE_TOKEN` if the CRM base is under another token). *no "Date Added" field*: leads are dated by `createdTime` instead. *no prospect has ever been marked Showed/No Show*: shows are inferred from closes only until the team uses the Showed stage.
 - **Retainer clients (lib/clients.js)** — never fails; edit the file to add a client, change a rate, or set `paused: true`.
